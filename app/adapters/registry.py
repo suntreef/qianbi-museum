@@ -15,7 +15,10 @@ BUILTIN_DOMAINS = {
     "notes.pmgcert.com": "PMG",
     "ngccoin.com": "NGC",
     "pcgs.com": "PCGS",
-    "gbca.cn": "公博",
+    "gongbocoins.com": "公博",      # 官网证书查询 /search（2026-11 实测可达；旧域 gbca.cn 已失效）
+    "huaxiapj.com": "华夏",         # 证书查询 /querySendItem.html（实测可达）
+    "wendepj.com": "闻德",          # 官网内证书查询（实测可达）
+    "airmb.com": "爱藏",            # 证书查询 pj.airmb.com/dc/search（实测可达）
 }
 
 

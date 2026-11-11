@@ -10,6 +10,8 @@ body {
 }
 .topbar .logo { font-weight: bold; }
 .topbar nav a { color: #d8cfae; text-decoration: none; margin-left: 16px; }
+.topbar .who { color: #9a927e; margin-left: 14px; font-size: 13px; }
+.pager { margin: 10px 0; font-size: 14px; color: #7a7468; }
 main { padding: 16px; max-width: 760px; margin: 0 auto; }
 
 .bigbtn {

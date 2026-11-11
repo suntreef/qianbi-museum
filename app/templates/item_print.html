@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>藏品档案卡</title>
+<style>
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+         color: #222; margin: 24px; font-size: 14px; }
+  h1 { font-size: 20px; border-bottom: 2px solid #333; padding-bottom: 6px; }
+  .code { font-size: 16px; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  td, th { border: 1px solid #999; padding: 6px 8px; text-align: left; }
+  th { background: #eee; width: 110px; }
+  .photos { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .photos img { width: 160px; height: 160px; object-fit: cover; border: 1px solid #999; }
+  .note { color: #666; font-size: 12px; margin-top: 8px; }
+  .noprint { margin-bottom: 14px; }
+  @media print {
+    .noprint { display: none; }
+    body { margin: 8mm; }
+  }
+</style>
+</head>
+<body>
+<div class="noprint">
+  <button onclick="window.print()">🖨 打印 / 存为 PDF</button>
+  <a href="/items/{{ item_id }}">← 返回档案</a>
+</div>
+<h1>藏品档案卡 <span class="code" id="code"></span></h1>
+<table id="fields"></table>
+<h3>照片</h3>
+<div class="photos" id="photos"></div>
+<p class="note">档案信息与参考图（如有）来源见备注与照片标注 · 打印时间 <span id="now"></span></p>
+
+<script>
+const ID = {{ item_id }};
+const LABELS = [
+  ['name','名称'], ['category','品类'], ['series','系列'], ['dynasty','朝代'],
+  ['bank','发行机构'], ['note_type','券种/类型'], ['printer','印刷厂'],
+  ['doc_type','文书类型'], ['era','年号/品种'], ['denomination','面值'],
+  ['variety','版别'], ['material','材质'], ['year_text','纪年'],
+  ['region','地域'], ['grade_co','评级公司'], ['cert_no','评级编号'],
+  ['grade_raw','分数'], ['grade_scale','分数制'], ['serial_no','冠字号'],
+  ['status','状态'], ['source','来源'], ['purchase_price','采购价'],
+  ['purchase_date','采购日期'], ['est_value','估值'], ['est_date','估值日期'],
+  ['notes','备注'],
+];
+const STATUS = {draft:'草稿', in_stock:'在库', reviewing:'送评中', exhibited:'展出中',
+  lent:'借出', consigned:'寄售', sold:'已售', lost:'丢失'};
+
+fetch('/api/items/' + ID).then(r => r.json()).then(d => {
+  document.getElementById('code').textContent = d.item_code || ('草稿 #' + d.id);
+  document.title = '档案卡 ' + (d.item_code || '');
+  const t = document.getElementById('fields');
+  for(const [f, label] of LABELS){
+    let v = d[f];
+    if(v === null || v === undefined || v === '') continue;
+    if(f === 'status') v = STATUS[v] || v;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<th>${label}</th><td>${v}</td>`;
+    t.appendChild(tr);
+  }
+  const ph = document.getElementById('photos');
+  for(const p of d.photos){
+    const img = document.createElement('img');
+    img.src = p.url;
+    ph.appendChild(img);
+  }
+});
+document.getElementById('now').textContent = new Date().toLocaleString('zh-CN');
+</script>
+</body>
+</html>

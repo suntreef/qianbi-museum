@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
+from . import models
 from .adapters import rules, webfetch
 from .adapters.registry import company_for_url
 from .config import ITEM_CODE_PREFIX, PHOTO_DIR
@@ -96,6 +97,7 @@ def ingest_label(image_bytes: bytes) -> dict:
                  fields.get("variety"), fields.get("year_text"), fields.get("year_sort"),
                  fields.get("serial_no"), None))
             item_id = cur.lastrowid
+            models.fts_sync(conn, item_id, fields)
             conn.execute(
                 "INSERT INTO recognition(item_id, engine, raw_json) VALUES(?,?,?)",
                 (item_id, parsed_from, json.dumps(
@@ -161,6 +163,7 @@ def create_manual(fields: dict) -> int:
         item_id = cur.lastrowid
         conn.execute("INSERT INTO recognition(item_id, engine, raw_json) VALUES(?,?,?)",
                      (item_id, "manual", "{}"))
+        models.fts_sync(conn, item_id, fields)
         return item_id
 
 
@@ -228,6 +231,10 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
             sets.append("updated_at=datetime('now','localtime')")
             conn.execute(f"UPDATE item SET {', '.join(sets)} WHERE id=?",
                          [*vals, item_id])
+            row2 = conn.execute(
+                "SELECT name, notes, region, variety, era, denomination "
+                "FROM item WHERE id=?", (item_id,)).fetchone()
+            models.fts_sync(conn, item_id, dict(row2))
         if new_status and new_status != row["status"]:
             detail = f"{row['status']} → {new_status}"
             if confirm and item_code:

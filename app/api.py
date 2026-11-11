@@ -1,21 +1,32 @@
-"""JSON API：录入、照片、确认、检索、字典、统计、导出。"""
+"""JSON API：录入、照片、确认、检索、字典、用户、统计、导出。
+
+权限矩阵：
+- admin：全部（用户管理、字典写、Excel 导出、删档案、价格/估值可见）
+- staff：采集录入、改档案（价格字段被服务端过滤）、删除照片
+- viewer：只读浏览（价格不可见），写接口一律 403
+"""
 import io
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from .auth import COOKIE, make_token, require_auth
+from . import models
+from .auth import COOKIE, hash_password, login_user, make_token, require_role
 from .config import PHOTO_DIR
 from .ingest import attach_photo, confirm_item, create_manual, ingest_label
 from .models import get_conn
 
 router = APIRouter(prefix="/api")
+
+require_any = require_role()                    # 任何已登录用户
+require_staff = require_role("admin", "staff")  # 录入及以上
+require_admin = require_role("admin")           # 仅管理员
 
 STATUS_CN = {"draft": "草稿", "in_stock": "在库", "reviewing": "送评中",
              "exhibited": "展出中", "lent": "借出", "consigned": "寄售",
@@ -34,8 +45,44 @@ EXPORT_COLS = [
     ("notes", "备注"), ("created_at", "录入时间"),
 ]
 
+FINANCIAL = ("purchase_price", "est_value")
+UPLOAD_MAX = 16 * 1024 * 1024
 
-# ---------- 登录 ----------
+
+def _strip_financial(d: dict, role: str) -> dict:
+    """非管理员看不到采购价与估值。"""
+    if role != "admin":
+        for k in FINANCIAL:
+            d.pop(k, None)
+    return d
+
+
+def _json(data: dict):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(data)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+# ---------- 登录 / 当前用户 ----------
+
+@router.post("/login")
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    user = login_user(_client_ip(request), username.strip(), password)
+    if not user:
+        raise HTTPException(401, "用户名或口令不对（连续失败将临时锁定）")
+    resp = _json({"ok": True, "role": user["role"]})
+    resp.set_cookie(COOKIE, make_token(user["id"]), httponly=True,
+                    samesite="lax", max_age=30 * 86400)
+    return resp
+
+
+@router.get("/me")
+def me(user: dict = Depends(require_any)):
+    return {"ok": True, "username": user["username"], "role": user["role"]}
+
 
 @router.post("/logout")
 def logout():
@@ -44,12 +91,87 @@ def logout():
     return resp
 
 
+# ---------- 用户管理（仅管理员） ----------
+
+class UserPayload(BaseModel):
+    username: str = ""
+    password: Optional[str] = None
+    role: str = "staff"
+    disabled: Optional[bool] = None
+
+
+@router.get("/users")
+def list_users(_: dict = Depends(require_admin)):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, username, role, disabled, created_at FROM users ORDER BY id"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.post("/users")
+def add_user(p: UserPayload, admin: dict = Depends(require_admin)):
+    if p.role not in ("admin", "staff", "viewer"):
+        raise HTTPException(400, "角色不对")
+    if not p.username.strip() or not p.password:
+        raise HTTPException(400, "用户名和口令必填")
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO users(username, password_hash, role) VALUES(?,?,?)",
+                (p.username.strip(), hash_password(p.password), p.role))
+        except Exception:
+            raise HTTPException(400, "用户名已存在")
+    return {"ok": True}
+
+
+@router.put("/users/{user_id}")
+def update_user(user_id: int, p: UserPayload, admin: dict = Depends(require_admin)):
+    with get_conn() as conn:
+        if not conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
+            raise HTTPException(404, "用户不存在")
+        if p.role:
+            if p.role not in ("admin", "staff", "viewer"):
+                raise HTTPException(400, "角色不对")
+            if user_id == admin["id"] and p.role != "admin":
+                raise HTTPException(400, "不能把自己的管理员权限降掉")
+            conn.execute("UPDATE users SET role=? WHERE id=?", (p.role, user_id))
+        if p.disabled is not None:
+            if user_id == admin["id"] and p.disabled:
+                raise HTTPException(400, "不能停用自己")
+            conn.execute("UPDATE users SET disabled=? WHERE id=?",
+                         (1 if p.disabled else 0, user_id))
+        if p.password:
+            conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                         (hash_password(p.password), user_id))
+    return {"ok": True}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, admin: dict = Depends(require_admin)):
+    if user_id == admin["id"]:
+        raise HTTPException(400, "不能删除自己")
+    with get_conn() as conn:
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    return {"ok": True}
+
+
 # ---------- 字典 ----------
 
+DICT_TYPES = ("category", "dynasty", "bank", "note_type", "series",
+              "printer", "doc_type", "grade_co", "material", "cert_domain")
+
+
+class DictPayload(BaseModel):
+    type: str
+    name: str
+    aliases: Optional[str] = None
+    sort: int = 50
+
+
 @router.get("/dict/{dict_type}")
-def get_dict(dict_type: str, _: None = Depends(require_auth)):
-    if dict_type not in ("category", "dynasty", "bank", "note_type", "series",
-                         "printer", "doc_type", "grade_co", "material", "cert_domain"):
+def get_dict(dict_type: str, _: dict = Depends(require_any)):
+    if dict_type not in DICT_TYPES:
         raise HTTPException(404, "未知字典类型")
     with get_conn() as conn:
         rows = conn.execute(
@@ -58,22 +180,75 @@ def get_dict(dict_type: str, _: None = Depends(require_auth)):
     return [{"name": r["name"], "aliases": r["aliases"]} for r in rows]
 
 
+@router.get("/dict-all")
+def dict_all(_: dict = Depends(require_any)):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM dict_entry ORDER BY type, sort, id").fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.post("/dict")
+def add_dict(p: DictPayload, _: dict = Depends(require_admin)):
+    if p.type not in DICT_TYPES:
+        raise HTTPException(400, "未知字典类型")
+    if not p.name.strip():
+        raise HTTPException(400, "名称不能为空")
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO dict_entry(type, name, aliases, sort) VALUES(?,?,?,?)
+               ON CONFLICT(type, name) DO UPDATE
+               SET aliases=excluded.aliases, sort=excluded.sort""",
+            (p.type, p.name.strip(), p.aliases, p.sort))
+    return {"ok": True}
+
+
+@router.put("/dict/{entry_id}")
+def update_dict(entry_id: int, p: DictPayload, _: dict = Depends(require_admin)):
+    if p.type not in DICT_TYPES or not p.name.strip():
+        raise HTTPException(400, "参数不对")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE dict_entry SET type=?, name=?, aliases=?, sort=? WHERE id=?",
+            (p.type, p.name.strip(), p.aliases, p.sort, entry_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "条目不存在")
+    return {"ok": True}
+
+
+@router.delete("/dict/{entry_id}")
+def delete_dict(entry_id: int, _: dict = Depends(require_admin)):
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM dict_entry WHERE id=?", (entry_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "条目不存在")
+    return {"ok": True}
+
+
 # ---------- 采集（识别流水线） ----------
 
 @router.post("/ingest/label")
-async def ingest_label_ep(photo: UploadFile = File(...), _: None = Depends(require_auth)):
+async def ingest_label_ep(photo: UploadFile = File(...),
+                          user: dict = Depends(require_staff)):
+    if photo.size and photo.size > UPLOAD_MAX:
+        raise HTTPException(413, "图片太大（限 16MB）")
     data = await photo.read()
     if not data:
         raise HTTPException(400, "空文件")
+    if len(data) > UPLOAD_MAX:
+        raise HTTPException(413, "图片太大（限 16MB）")
     return await run_in_threadpool(ingest_label, data)
 
 
 @router.post("/items/{item_id}/photos")
 async def upload_photo(item_id: int, photo: UploadFile = File(...),
-                       shot_type: str = Form("front"), _: None = Depends(require_auth)):
+                       shot_type: str = Form("front"),
+                       user: dict = Depends(require_staff)):
+    if photo.size and photo.size > UPLOAD_MAX:
+        raise HTTPException(413, "图片太大（限 16MB）")
     data = await photo.read()
-    if not data:
-        raise HTTPException(400, "空文件")
+    if not data or len(data) > UPLOAD_MAX:
+        raise HTTPException(400, "空文件或图片太大")
     return await run_in_threadpool(attach_photo, item_id, data, shot_type)
 
 
@@ -82,66 +257,84 @@ async def upload_photo(item_id: int, photo: UploadFile = File(...),
 class ItemPayload(BaseModel):
     fields: dict = {}
     confirm: bool = False
-    operator: Optional[str] = None
     status: Optional[str] = None
 
 
 @router.post("/items")
-async def create_item_ep(payload: ItemPayload, _: None = Depends(require_auth)):
-    item_id = await run_in_threadpool(create_manual, payload.fields)
+async def create_item_ep(payload: ItemPayload, user: dict = Depends(require_staff)):
+    fields = dict(payload.fields or {})
+    if user["role"] != "admin":
+        for k in FINANCIAL:
+            fields.pop(k, None)
+    item_id = await run_in_threadpool(create_manual, fields)
     return {"ok": True, "item_id": item_id}
 
 
 @router.post("/items/{item_id}")
 async def update_item_ep(item_id: int, payload: ItemPayload,
-                         _: None = Depends(require_auth)):
+                         user: dict = Depends(require_staff)):
+    fields = dict(payload.fields or {})
+    if user["role"] != "admin":
+        for k in FINANCIAL:
+            fields.pop(k, None)   # 非管理员的改价直接丢弃
     return await run_in_threadpool(
-        confirm_item, item_id, payload.fields, payload.confirm,
-        payload.operator, payload.status)
+        confirm_item, item_id, fields, payload.confirm, user["username"], payload.status)
 
 
 @router.get("/items")
-def search_items(q: Optional[str] = None, category: Optional[str] = None,
-                 series: Optional[str] = None, note_type: Optional[str] = None,
-                 bank: Optional[str] = None, printer: Optional[str] = None,
-                 doc_type: Optional[str] = None, dynasty: Optional[str] = None,
-                 status: Optional[str] = None, year_from: Optional[int] = None,
-                 year_to: Optional[int] = None, limit: int = 50, offset: int = 0,
-                 _: None = Depends(require_auth)):
+def search_items(request: Request, q: Optional[str] = None,
+                 category: Optional[str] = None, series: Optional[str] = None,
+                 note_type: Optional[str] = None, bank: Optional[str] = None,
+                 printer: Optional[str] = None, doc_type: Optional[str] = None,
+                 dynasty: Optional[str] = None, status: Optional[str] = None,
+                 year_from: Optional[int] = None, year_to: Optional[int] = None,
+                 limit: int = 50, offset: int = 0,
+                 user: dict = Depends(require_any)):
     where, vals = ["1=1"], []
-
-    def add(cond: str, *v):
-        where.append(cond)
-        vals.extend(v)
-
-    if q:
-        like = f"%{q}%"
-        cols = ("name", "era", "cert_no", "item_code", "region", "variety",
-                "notes", "denomination", "serial_no", "bank", "note_type")
-        add("(" + " OR ".join(f"{c} LIKE ?" for c in cols) + ")", *([like] * len(cols)))
-    for col, v in (("category", category), ("series", series),
-                   ("note_type", note_type), ("bank", bank), ("printer", printer),
-                   ("doc_type", doc_type), ("dynasty", dynasty), ("status", status)):
-        if v:
-            add(f"{col}=?", v)
-    if year_from is not None:
-        add("year_sort >= ?", year_from)
-    if year_to is not None:
-        add("year_sort <= ?", year_to)
-
-    limit = max(1, min(limit, 200))
     with get_conn() as conn:
+        if q:
+            # 中文全文索引优先（≥3 字子串，走 trigram 索引，大库也快）；
+            # 不足 3 字或库不支持 FTS 时降级 LIKE
+            ids = models.fts_search_ids(conn, q)
+            if ids is not None:
+                if not ids:
+                    return {"ok": True, "total": 0, "items": []}
+                where.append(f"id IN ({','.join('?' * len(ids))})")
+                vals.extend(ids)
+            else:
+                like = f"%{q}%"
+                cols = ("name", "era", "cert_no", "item_code", "region", "variety",
+                        "notes", "denomination", "serial_no", "bank", "note_type")
+                where.append("(" + " OR ".join(f"{c} LIKE ?" for c in cols) + ")")
+                vals.extend([like] * len(cols))
+        for col, v in (("category", category), ("series", series),
+                       ("note_type", note_type), ("bank", bank),
+                       ("printer", printer), ("doc_type", doc_type),
+                       ("dynasty", dynasty), ("status", status)):
+            if v:
+                where.append(f"{col}=?")
+                vals.append(v)
+        if year_from is not None:
+            where.append("year_sort >= ?")
+            vals.append(year_from)
+        if year_to is not None:
+            where.append("year_sort <= ?")
+            vals.append(year_to)
+
+        limit = max(1, min(limit, 200))
         total = conn.execute(
-            f"SELECT COUNT(*) FROM item WHERE {' AND '.join(where)}", vals
-        ).fetchone()[0]
+            f"SELECT COUNT(*) FROM item WHERE {' AND '.join(where)}", vals).fetchone()[0]
         rows = conn.execute(
             f"SELECT * FROM item WHERE {' AND '.join(where)} "
             "ORDER BY id DESC LIMIT ? OFFSET ?", [*vals, limit, offset]).fetchall()
-    return {"ok": True, "total": total, "items": [dict(r) for r in rows]}
+
+    role = user["role"]
+    return {"ok": True, "total": total,
+            "items": [_strip_financial(dict(r), role) for r in rows]}
 
 
 @router.get("/items/{item_id}")
-def item_detail(item_id: int, _: None = Depends(require_auth)):
+def item_detail(item_id: int, user: dict = Depends(require_any)):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM item WHERE id=?", (item_id,)).fetchone()
         if not row:
@@ -151,43 +344,25 @@ def item_detail(item_id: int, _: None = Depends(require_auth)):
             "FROM photo WHERE item_id=? ORDER BY id", (item_id,)).fetchall()
     out = dict(row)
     out["photos"] = [dict(p, url=f"/media/{p['file_path']}") for p in photos]
-    return out
+    return _strip_financial(out, user["role"])
 
 
-@router.get("/pending")
-def pending_items(_: None = Depends(require_auth)):
-    """待确认草稿队列。"""
+@router.delete("/items/{item_id}")
+def delete_item(item_id: int, _: dict = Depends(require_admin)):
+    import shutil
     with get_conn() as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM item WHERE status='draft'").fetchone()[0]
-        rows = conn.execute(
-            "SELECT id, name, cert_no, grade_raw, created_at FROM item "
-            "WHERE status='draft' ORDER BY id DESC LIMIT 100").fetchall()
-    return {"ok": True, "count": count, "items": [dict(r) for r in rows]}
+        if not conn.execute("SELECT id FROM item WHERE id=?", (item_id,)).fetchone():
+            raise HTTPException(404, "藏品不存在")
+        models.fts_delete(conn, item_id)
+        for t in ("photo", "recognition", "cert_fetch", "event"):
+            conn.execute(f"DELETE FROM {t} WHERE item_id=?", (item_id,))
+        conn.execute("DELETE FROM item WHERE id=?", (item_id,))
+    shutil.rmtree(PHOTO_DIR / str(item_id), ignore_errors=True)
+    return {"ok": True}
 
-
-# ---------- 工具 ----------
-
-def _json(data: dict):
-    from fastapi.responses import JSONResponse
-    return JSONResponse(data)
-
-
-@router.post("/login")
-async def login(password: str = Form(...)):
-    from .config import APP_PASSWORD
-    if password != APP_PASSWORD:
-        raise HTTPException(401, "口令不对")
-    resp = _json({"ok": True})
-    resp.set_cookie(COOKIE, make_token(), httponly=True, samesite="lax",
-                    max_age=30 * 86400)
-    return resp
-
-
-# ---------- 照片 / 藏品删除 ----------
 
 @router.delete("/photos/{photo_id}")
-def delete_photo(photo_id: int, _: None = Depends(require_auth)):
+def delete_photo(photo_id: int, _: dict = Depends(require_staff)):
     with get_conn() as conn:
         row = conn.execute("SELECT file_path FROM photo WHERE id=?",
                            (photo_id,)).fetchone()
@@ -198,24 +373,19 @@ def delete_photo(photo_id: int, _: None = Depends(require_auth)):
     return {"ok": True}
 
 
-@router.delete("/items/{item_id}")
-def delete_item(item_id: int, _: None = Depends(require_auth)):
-    import shutil
+@router.get("/pending")
+def pending_items(_: dict = Depends(require_any)):
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM item WHERE id=?", (item_id,)).fetchone():
-            raise HTTPException(404, "藏品不存在")
-        for t in ("photo", "recognition", "cert_fetch", "event"):
-            conn.execute(f"DELETE FROM {t} WHERE item_id=?", (item_id,))
-        conn.execute("DELETE FROM item WHERE id=?", (item_id,))
-    shutil.rmtree(PHOTO_DIR / str(item_id), ignore_errors=True)
-    return {"ok": True}
+        count = conn.execute(
+            "SELECT COUNT(*) FROM item WHERE status='draft'").fetchone()[0]
+        rows = conn.execute(
+            "SELECT id, name, cert_no, grade_raw, created_at FROM item "
+            "WHERE status='draft' ORDER BY id DESC LIMIT 100").fetchall()
+    return {"ok": True, "count": count, "items": [dict(r) for r in rows]}
 
-
-# ---------- 补拍队列 ----------
 
 @router.get("/needs-photos")
-def needs_photos(_: None = Depends(require_auth)):
-    """缺正面或背面档案图的藏品清单。"""
+def needs_photos(_: dict = Depends(require_any)):
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT i.id, i.item_code, i.name, i.status, i.grade_co, i.grade_raw,
@@ -234,71 +404,14 @@ def needs_photos(_: None = Depends(require_auth)):
     return {"ok": True, "count": len(items), "items": items}
 
 
-# ---------- 字典管理 ----------
-
-DICT_TYPES = ("category", "dynasty", "bank", "note_type", "series",
-              "printer", "doc_type", "grade_co", "material", "cert_domain")
-
-
-class DictPayload(BaseModel):
-    type: str
-    name: str
-    aliases: Optional[str] = None
-    sort: int = 50
-
-
-@router.get("/dict-all")
-def dict_all(_: None = Depends(require_auth)):
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM dict_entry ORDER BY type, sort, id").fetchall()
-    return [dict(r) for r in rows]
-
-
-@router.post("/dict")
-def add_dict(p: DictPayload, _: None = Depends(require_auth)):
-    if p.type not in DICT_TYPES:
-        raise HTTPException(400, "未知字典类型")
-    if not p.name.strip():
-        raise HTTPException(400, "名称不能为空")
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO dict_entry(type, name, aliases, sort) VALUES(?,?,?,?)
-               ON CONFLICT(type, name) DO UPDATE
-               SET aliases=excluded.aliases, sort=excluded.sort""",
-            (p.type, p.name.strip(), p.aliases, p.sort))
-    return {"ok": True}
-
-
-@router.put("/dict/{entry_id}")
-def update_dict(entry_id: int, p: DictPayload, _: None = Depends(require_auth)):
-    if p.type not in DICT_TYPES or not p.name.strip():
-        raise HTTPException(400, "参数不对")
-    with get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE dict_entry SET type=?, name=?, aliases=?, sort=? WHERE id=?",
-            (p.type, p.name.strip(), p.aliases, p.sort, entry_id))
-        if cur.rowcount == 0:
-            raise HTTPException(404, "条目不存在")
-    return {"ok": True}
-
-
-@router.delete("/dict/{entry_id}")
-def delete_dict(entry_id: int, _: None = Depends(require_auth)):
-    with get_conn() as conn:
-        cur = conn.execute("DELETE FROM dict_entry WHERE id=?", (entry_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(404, "条目不存在")
-    return {"ok": True}
-
-
 # ---------- 统计 ----------
 
 @router.get("/stats")
-def stats(_: None = Depends(require_auth)):
+def stats(user: dict = Depends(require_any)):
     with get_conn() as conn:
         def group(sql: str):
             return {r[0] or "未填": r[1] for r in conn.execute(sql).fetchall()}
+        est_total = conn.execute("SELECT SUM(est_value) FROM item").fetchone()[0] or 0
         return {
             "ok": True,
             "total": conn.execute("SELECT COUNT(*) FROM item").fetchone()[0],
@@ -307,8 +420,7 @@ def stats(_: None = Depends(require_auth)):
             "draft": conn.execute(
                 "SELECT COUNT(*) FROM item WHERE status='draft'").fetchone()[0],
             "photos": conn.execute("SELECT COUNT(*) FROM photo").fetchone()[0],
-            "est_total": conn.execute(
-                "SELECT SUM(est_value) FROM item").fetchone()[0] or 0,
+            "est_total": est_total if user["role"] == "admin" else 0,
             "by_category": group("SELECT category, COUNT(*) FROM item GROUP BY category"),
             "by_status": group("SELECT status, COUNT(*) FROM item GROUP BY status"),
             "by_series": group("SELECT series, COUNT(*) FROM item GROUP BY series"),
@@ -318,10 +430,10 @@ def stats(_: None = Depends(require_auth)):
         }
 
 
-# ---------- Excel 导出 ----------
+# ---------- Excel 导出（含价格，仅管理员） ----------
 
 @router.get("/export/xlsx")
-def export_xlsx(_: None = Depends(require_auth)):
+def export_xlsx(_: dict = Depends(require_admin)):
     wb = Workbook()
     ws = wb.active
     ws.title = "藏品台账"

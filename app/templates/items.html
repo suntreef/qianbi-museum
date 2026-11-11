@@ -3,7 +3,7 @@
 <h2>藏品检索</h2>
 <section class="statsbar" id="statsbar"></section>
 <section class="filters">
-  <input id="q" placeholder="搜索：名称/机构/编号/备注…" style="flex:1;min-width:180px">
+  <input id="q" placeholder="搜索：名称/机构/编号/备注…（≥3字走全文索引）" style="flex:1;min-width:180px">
   <select id="fCategory"><option value="">全部品类</option></select>
   <select id="fSeries"><option value="">全部系列</option></select>
   <select id="fStatus">
@@ -16,7 +16,7 @@
   <input id="yFrom" type="number" placeholder="年份从" style="width:90px">
   <input id="yTo" type="number" placeholder="到" style="width:70px">
   <button class="primary" id="go">查询</button>
-  <a class="btnlink" href="/api/export/xlsx" download>⬇️ 导出Excel</a>
+  {% if user and user.role == 'admin' %}<a class="btnlink" href="/api/export/xlsx" download>⬇️ 导出Excel</a>{% endif %}
 </section>
 <p class="hint"><a href="#" id="needPhotosLink">📷 待补拍清单</a> · <span id="total"></span></p>
 <section id="needPhotos" hidden></section>
@@ -27,11 +27,16 @@
   </tr></thead>
   <tbody></tbody>
 </table>
+<div class="pager" id="pager"></div>
 
 <script>
 const $ = s => document.querySelector(s);
 const STATUS = {draft:'草稿', in_stock:'在库', reviewing:'送评中', exhibited:'展出中',
   lent:'借出', consigned:'寄售', sold:'已售', lost:'丢失'};
+const PAGE = 50;
+let page = 0;
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function j(url, opt){
   const r = await fetch(url, opt);
@@ -42,23 +47,22 @@ async function j(url, opt){
 async function loadStats(){
   const s = await j('/api/stats');
   const np = await j('/api/needs-photos');
-  const bar = $('#statsbar');
-  bar.innerHTML =
-    `<span><b>${s.total}</b> 件</span>
+  let bar = `<span><b>${s.total}</b> 件</span>
      <span>在库/展出等 <b>${s.confirmed}</b></span>
      <span>草稿 <b>${s.draft}</b></span>
      <span>照片 <b>${s.photos}</b> 张</span>
-     <span>估值合计 <b>${s.est_total ? s.est_total.toLocaleString() : 0}</b> 元</span>
      <span>缺照片 <b>${np.count}</b> 件</span>`;
-  const sec = $('#needPhotos'); sec.hidden = true;
+  if(s.est_total) bar += `<span>估值合计 <b>${Number(s.est_total).toLocaleString()}</b> 元</span>`;
+  $('#statsbar').innerHTML = bar;
+  const sec = $('#needPhotos'); sec.hidden = true; sec.dataset.loaded = '';
   $('#needPhotosLink').textContent = `📷 待补拍清单（${np.count}）`;
   $('#needPhotosLink').onclick = (e) => {
     e.preventDefault();
     sec.hidden = !sec.hidden;
     if(!sec.hidden && !sec.dataset.loaded){
       sec.innerHTML = np.items.map(it =>
-        `<div class="needsrow"><a href="/items/${it.id}">${it.item_code || ('草稿#'+it.id)}</a>
-         ${it.name||''} <span class="hint">缺${it.missing.map(m=>m==='front'?'正面':'背面').join('、')}</span></div>`
+        `<div class="needsrow"><a href="/items/${it.id}">${esc(it.item_code) || ('草稿#'+it.id)}</a>
+         ${esc(it.name)} <span class="hint">缺${it.missing.map(m=>m==='front'?'正面':'背面').join('、')}</span></div>`
       ).join('') || '<span class="hint">没有缺照片的藏品</span>';
       sec.dataset.loaded = 1;
     }
@@ -73,15 +77,18 @@ async function fill(sel, type){
     sel.appendChild(op);
   }
 }
-async function search(){
-  const p = new URLSearchParams();
-  if($('#q').value) p.set('q', $('#q').value);
-  if($('#fCategory').value) p.set('category', $('#fCategory').value);
-  if($('#fSeries').value) p.set('series', $('#fSeries').value);
-  if($('#fStatus').value) p.set('status', $('#fStatus').value);
-  if($('#yFrom').value) p.set('year_from', $('#yFrom').value);
-  if($('#yTo').value) p.set('year_to', $('#yTo').value);
-  const d = await j('/api/items?' + p);
+async function search(p){
+  if(p !== undefined) page = p;
+  const params = new URLSearchParams();
+  if($('#q').value) params.set('q', $('#q').value);
+  if($('#fCategory').value) params.set('category', $('#fCategory').value);
+  if($('#fSeries').value) params.set('series', $('#fSeries').value);
+  if($('#fStatus').value) params.set('status', $('#fStatus').value);
+  if($('#yFrom').value) params.set('year_from', $('#yFrom').value);
+  if($('#yTo').value) params.set('year_to', $('#yTo').value);
+  params.set('limit', PAGE);
+  params.set('offset', page * PAGE);
+  const d = await j('/api/items?' + params);
   $('#total').textContent = `共 ${d.total} 件`;
   const tb = $('#tbl tbody');
   tb.innerHTML = '';
@@ -89,18 +96,26 @@ async function search(){
     const tr = document.createElement('tr');
     tr.style.cursor = 'pointer';
     tr.onclick = () => location = '/items/' + it.id;
-    tr.innerHTML = `<td>${it.item_code||''}</td><td>${it.name||''}</td>
-      <td>${it.category||''}</td><td>${it.series||''}</td>
-      <td>${(it.bank||'') + (it.note_type?(' '+it.note_type):'')}</td>
-      <td>${it.year_text||''}</td>
-      <td>${(it.grade_co||'') + (it.grade_raw?(' '+it.grade_raw):'')}</td>
+    tr.innerHTML = `<td>${esc(it.item_code)}</td><td>${esc(it.name)}</td>
+      <td>${esc(it.category)}</td><td>${esc(it.series)}</td>
+      <td>${esc((it.bank||'') + (it.note_type?(' '+it.note_type):''))}</td>
+      <td>${esc(it.year_text)}</td>
+      <td>${esc((it.grade_co||'') + (it.grade_raw?(' '+it.grade_raw):''))}</td>
       <td>${STATUS[it.status]||it.status}</td>`;
     tb.appendChild(tr);
   }
+  const pages = Math.max(1, Math.ceil(d.total / PAGE));
+  let html = '';
+  if(pages > 1){
+    if(page > 0) html += `<button class="mini" onclick="search(${page-1})">上一页</button> `;
+    html += `第 ${page+1} / ${pages} 页`;
+    if(page < pages-1) html += ` <button class="mini" onclick="search(${page+1})">下一页</button>`;
+  }
+  $('#pager').innerHTML = html;
 }
-$('#go').onclick = search;
-$('#q').onkeydown = e => { if(e.key==='Enter') search(); };
+$('#go').onclick = () => search(0);
+$('#q').onkeydown = e => { if(e.key==='Enter') search(0); };
 Promise.all([fill($('#fCategory'),'category'), fill($('#fSeries'),'series')])
-  .then(() => { search(); loadStats(); });
+  .then(() => { search(0); loadStats(); });
 </script>
 {% endblock %}

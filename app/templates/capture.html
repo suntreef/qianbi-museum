@@ -90,17 +90,22 @@ async function upload(file, url, extra){
 }
 
 async function handleLabelFiles(files){
+  let i = 0, ok = 0, dup = 0;
   for(const f of files){
-    toast('识别中：' + f.name);
+    i++;
+    toast(`识别中 ${i}/${files.length}：` + f.name);
     const d = await upload(f, '/api/ingest/label');
     if(!d) return;
     if(d.dupe){
+      dup++;
       toast(`⚠️ 重复：编号 ${d.cert_no} 已入库（${d.existing.item_code||''} ${d.existing.name||''}）`, false);
       continue;
     }
-    if(d.ok) await addCard(d.item_id, d.fields, d);
+    if(d.ok){ ok++; await addCard(d.item_id, d.fields, d); }
     else toast('识别失败，请重拍或手动录入', false);
   }
+  if(files.length > 1)
+    toast(`批量识别完成：${ok} 件待确认，${dup} 件重复已拦截`, ok + dup === files.length);
 }
 
 async function fillSelect(sel, options, value){
