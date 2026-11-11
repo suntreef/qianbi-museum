@@ -10,7 +10,7 @@ import os
 import sqlite3 as _sqlite3
 import tempfile as _tempfile
 from datetime import datetime as _dt
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import models
 from .auth import COOKIE, hash_password, login_user, make_token, require_role
-from .config import PHOTO_DIR
+from .config import BATCH_DIR, PHOTO_DIR
 from .ingest import attach_photo, confirm_item, create_manual, ingest_label
 from .models import get_conn
 
@@ -668,3 +668,159 @@ def backup_db(_: dict = Depends(require_admin)):
         tmp, filename="museum.db",
         headers={"Content-Disposition": f"attachment; filename=museum.db; filename*=UTF-8''{fname}"},
         background=BackgroundTask(os.unlink, tmp))
+
+
+# ---------- 批量识别队列（照片扔进去人就能走） ----------
+
+@router.post("/batch")
+async def upload_batch(files: List[UploadFile] = File(...),
+                       user: dict = Depends(require_staff)):
+    files = files[:60]   # 一次最多 60 张，多了分几次传
+    with get_conn() as conn:
+        cur = conn.execute("INSERT INTO batch_job(created_by) VALUES(?)",
+                           (user["username"],))
+        job_id = cur.lastrowid
+    queued = await _save_batch_files(job_id, files)
+    return {"ok": True, "job_id": job_id, "queued": queued}
+
+
+@router.post("/batch/{job_id}/files")
+async def append_batch(job_id: int, files: List[UploadFile] = File(...),
+                       _: dict = Depends(require_staff)):
+    with get_conn() as conn:
+        if not conn.execute("SELECT id FROM batch_job WHERE id=?", (job_id,)).fetchone():
+            raise HTTPException(404, "任务不存在")
+        conn.execute("UPDATE batch_job SET status='running' WHERE id=?", (job_id,))
+    queued = await _save_batch_files(job_id, files[:60])
+    return {"ok": True, "job_id": job_id, "queued": queued}
+
+
+async def _save_batch_files(job_id: int, files: List[UploadFile]) -> int:
+    d = BATCH_DIR / str(job_id)
+    d.mkdir(parents=True, exist_ok=True)
+    queued = 0
+    with get_conn() as conn:
+        for i, f in enumerate(files):
+            try:
+                if f.size and f.size > UPLOAD_MAX:
+                    continue
+                data = await f.read()
+                if not data or len(data) > UPLOAD_MAX:
+                    continue
+                path = d / f"{_dt.now():%H%M%S}_{i:03d}.jpg"
+                path.write_bytes(data)
+                conn.execute(
+                    "INSERT INTO batch_item(job_id, filename, path) VALUES(?,?,?)",
+                    (job_id, f.filename, str(path)))
+                conn.execute("UPDATE batch_job SET total = total + 1 WHERE id=?",
+                             (job_id,))
+                queued += 1
+            except Exception:
+                continue
+    return queued
+
+
+@router.get("/batch")
+def batch_list(_: dict = Depends(require_staff)):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM batch_job ORDER BY id DESC LIMIT 20").fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.get("/batch/{job_id}")
+def batch_detail(job_id: int, _: dict = Depends(require_staff)):
+    with get_conn() as conn:
+        job = conn.execute("SELECT * FROM batch_job WHERE id=?", (job_id,)).fetchone()
+        if not job:
+            raise HTTPException(404, "任务不存在")
+        items = conn.execute(
+            "SELECT id, filename, status, item_id, message FROM batch_item "
+            "WHERE job_id=? ORDER BY id LIMIT 500", (job_id,)).fetchall()
+    return {"ok": True, "job": dict(job), "items": [dict(i) for i in items]}
+
+
+@router.post("/batch/{job_id}/stop")
+def batch_stop(job_id: int, _: dict = Depends(require_admin)):
+    with get_conn() as conn:
+        conn.execute("UPDATE batch_job SET status='done' WHERE id=?", (job_id,))
+    return {"ok": True}
+
+
+# ---------- 二维码生成（展签用） ----------
+
+@router.get("/qr")
+def qr_image(text: str, _: dict = Depends(require_any)):
+    import qrcode
+    img = qrcode.make(text)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
+
+
+# ---------- 游客导览数据（免登录，只含展示字段，绝无价格/库位/来源） ----------
+
+PUB_FIELDS = ("item_code", "name", "category", "series", "dynasty", "bank",
+              "note_type", "printer", "doc_type", "era", "denomination",
+              "variety", "material", "year_text", "region",
+              "grade_co", "grade_raw")
+
+
+@router.get("/pub/item/{code}")
+def pub_item(code: str):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM item WHERE item_code=?",
+                           (code.strip(),)).fetchone()
+        if not row:
+            raise HTTPException(404, "未找到该藏品")
+        photos = conn.execute(
+            "SELECT file_path FROM photo WHERE item_id=? ORDER BY id", (row["id"],)
+        ).fetchall()
+    out = {k: row[k] for k in PUB_FIELDS if row[k]}
+    out["photos"] = [f"/media/{p['file_path']}" for p in photos]
+    return out
+
+
+# ---------- 档案体检（数据质量报告，仅管理员） ----------
+
+@router.get("/health-report")
+def health_report(_: dict = Depends(require_admin)):
+    with get_conn() as conn:
+        one = lambda sql: conn.execute(sql).fetchone()[0]
+        return {
+            "ok": True,
+            "no_location": one(
+                "SELECT COUNT(*) FROM item WHERE location_id IS NULL "
+                "AND status IN ('draft','in_stock')"),
+            "no_front": one(
+                "SELECT COUNT(*) FROM item i WHERE i.status IN ('draft','in_stock') "
+                "AND NOT EXISTS(SELECT 1 FROM photo p WHERE p.item_id=i.id "
+                "AND p.shot_type='front' AND p.origin='archive')"),
+            "no_back": one(
+                "SELECT COUNT(*) FROM item i WHERE i.status IN ('draft','in_stock') "
+                "AND NOT EXISTS(SELECT 1 FROM photo p WHERE p.item_id=i.id "
+                "AND p.shot_type='back' AND p.origin='archive')"),
+            "no_name": one(
+                "SELECT COUNT(*) FROM item WHERE name IS NULL OR name=''"),
+            "no_year": one(
+                "SELECT COUNT(*) FROM item WHERE year_text IS NULL OR year_text=''"),
+            "no_grade": one(
+                "SELECT COUNT(*) FROM item WHERE grade_co IS NULL OR grade_co IN ('','无')"),
+            "dup_photos": one(
+                "SELECT COUNT(*) FROM (SELECT phash FROM photo WHERE phash IS NOT NULL "
+                "GROUP BY phash HAVING COUNT(*) > 1)"),
+        }
+
+
+# ---------- 全局操作日志（仅管理员） ----------
+
+@router.get("/events")
+def all_events(_: dict = Depends(require_admin)):
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT e.id, e.kind, e.detail, e.operator, e.created_at,
+                      i.item_code, i.name
+               FROM event e LEFT JOIN item i ON i.id = e.item_id
+               ORDER BY e.id DESC LIMIT 200""").fetchall()
+    return [dict(r) for r in rows]

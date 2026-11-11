@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from . import models
 from .adapters import rules, webfetch
-from .adapters.registry import company_for_url
+from .adapters.registry import company_for_url, lookup_url_for
 from .config import ITEM_CODE_PREFIX, PHOTO_DIR
 from .models import get_conn
 from .services import ocr, photos, qr, years
@@ -128,9 +128,14 @@ def ingest_label(image_bytes: bytes) -> dict:
                         ref_saved += 1
                         ref_urls.append(f"/media/{meta['file_path']}")
 
+        lookup_url = None
+        if parsed_from != "qr_cert":
+            lookup_url = lookup_url_for(fields.get("grade_co"))
+
         return {"ok": True, "item_id": item_id, "fields": fields,
                 "parsed_from": parsed_from, "cert_url": cert_url,
-                "ref_photos": ref_saved, "ref_photo_urls": ref_urls, "qr_url": qr_url}
+                "ref_photos": ref_saved, "ref_photo_urls": ref_urls,
+                "qr_url": qr_url, "lookup_url": lookup_url}
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -236,8 +241,9 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
                     (item_id, "位置变更",
                      f"{row['location_id'] or '无'} → {loc_id or '无'}", operator))
 
+        # 状态改为在库时也补发一物一码（批量任务/编辑页改状态都能走到）
         item_code = row["item_code"]
-        if confirm and not item_code:
+        if (confirm or new_status == "in_stock") and not item_code:
             item_code = f"{ITEM_CODE_PREFIX}-{datetime.now().year}-{item_id:04d}"
             sets.append("item_code=?")
             vals.append(item_code)

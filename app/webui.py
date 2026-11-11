@@ -93,6 +93,49 @@ def inventory_page(request: Request):
     return templates.TemplateResponse(request, "inventory.html", _ctx(request))
 
 
+@router.get("/batch")
+def batch_page(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user["role"] not in ("admin", "staff"):
+        return RedirectResponse("/items", 303)
+    return templates.TemplateResponse(request, "batch.html", _ctx(request))
+
+
+@router.get("/checkup")
+def checkup_page(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user["role"] != "admin":
+        return RedirectResponse("/items", 303)
+    return templates.TemplateResponse(request, "checkup.html", _ctx(request))
+
+
+@router.get("/logs")
+def logs_page(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user["role"] != "admin":
+        return RedirectResponse("/items", 303)
+    return templates.TemplateResponse(request, "logs.html", _ctx(request))
+
+
+@router.get("/items/{item_id}/tag")
+def item_tag_page(item_id: int, request: Request):
+    if not _authed(request):
+        return RedirectResponse("/login", 303)
+    return templates.TemplateResponse(request, "item_tag.html", _ctx(request, item_id=item_id))
+
+
+@router.get("/pub/item/{code}")
+def pub_item_page(code: str, request: Request):
+    """游客导览页（免登录，内网可访问），只展示脱敏字段。"""
+    return templates.TemplateResponse(request, "pub_item.html", {"code": code})
+
+
 @router.get("/dict")
 def dict_page(request: Request):
     user = current_user(request)

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>藏品导览</title>
+<style>
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0;
+         background: #f7f5f0; color: #2c2a26; }
+  header { background: #3a3630; color: #f5f0e6; padding: 14px 18px; font-weight: bold; }
+  main { max-width: 640px; margin: 0 auto; padding: 18px; }
+  h1 { font-size: 22px; margin: 8px 0; }
+  .photos img { width: 100%; border-radius: 12px; margin-bottom: 10px; border: 1px solid #ddd; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px;
+          overflow: hidden; margin-top: 12px; }
+  td { padding: 9px 12px; border-bottom: 1px solid #eee; font-size: 15px; }
+  td:first-child { color: #8a7a52; width: 90px; }
+  footer { text-align: center; color: #999; font-size: 12px; padding: 20px; }
+</style>
+</head>
+<body>
+<header>🏛️ 钱币博物馆 · 数字导览</header>
+<main id="main"><p>加载中…</p></main>
+<footer>本页为馆内导览页，仅展示藏品公开信息</footer>
+
+<script>
+const FIELDS = [["category","品类"],["series","系列"],["dynasty","朝代"],["bank","发行机构"],
+  ["note_type","券种/类型"],["printer","印刷厂"],["doc_type","文书类型"],["era","年号/品种"],
+  ["denomination","面值"],["variety","版别"],["material","材质"],["year_text","纪年"],
+  ["region","地域"],["grade_co","评级公司"],["grade_raw","品相"]];
+fetch('/api/pub/item/' + encodeURIComponent('{{ code }}')).then(r => {
+  if(!r.ok) throw 0;
+  return r.json();
+}).then(d => {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let html = `<h1>${esc(d.name)}</h1>
+    <div class="photos">${(d.photos||[]).map(u => `<img src="${u}" loading="lazy">`).join('')}</div>
+    <table>`;
+  for(const [f, label] of FIELDS){
+    if(!d[f]) continue;
+    html += `<tr><td>${label}</td><td>${esc(d[f])}</td></tr>`;
+  }
+  html += '</table>';
+  document.getElementById('main').innerHTML = html;
+  document.title = d.name || '藏品导览';
+}).catch(() => {
+  document.getElementById('main').innerHTML =
+    '<p>未找到该藏品，请核对展签上的二维码。</p>';
+});
+</script>
+</body>
+</html>

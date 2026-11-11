@@ -5,6 +5,7 @@ from pathlib import Path
 # 数据目录：数据库 + 照片都在这里，备份 = 复制这个目录
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
 PHOTO_DIR = DATA_DIR / "photos"
+BATCH_DIR = DATA_DIR / "batch"
 DB_PATH = DATA_DIR / "museum.db"
 
 # 登录
@@ -27,5 +28,5 @@ ITEM_CODE_PREFIX = os.environ.get("ITEM_CODE_PREFIX", "M")
 # 静态资源目录（随代码打包，不在数据盘）
 STATIC_DIR = Path(__file__).parent / "static"
 
-for _d in (DATA_DIR, PHOTO_DIR):
+for _d in (DATA_DIR, PHOTO_DIR, BATCH_DIR):
     _d.mkdir(parents=True, exist_ok=True)

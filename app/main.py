@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from . import models
 from .api import router as api_router
 from .auth import ensure_default_admin
+from .batch import start_worker
 from .config import LLM_API_KEY, PHOTO_DIR, STATIC_DIR
 from .seeds.dict_seed import load_seeds
 from .services import ocr
@@ -18,6 +19,7 @@ async def lifespan(_: FastAPI):
     models.init_db()
     load_seeds()
     ensure_default_admin()
+    start_worker()
     yield
 
 

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>档案体检</h2>
+<p class="hint">数据质量报告。数字越少越健康——点进对应清单去补齐。</p>
+<section class="statsbar" id="bar"></section>
+<table id="tbl">
+  <thead><tr><th>检查项</th><th>数量</th><th>处理入口</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const $ = s => document.querySelector(s);
+async function j(url){
+  const r = await fetch(url);
+  if(r.status===401) return location='/login';
+  return r.json();
+}
+const ROWS = [
+  ["no_location", "未入库位（在库/草稿）", "/items?__loc=none"],
+  ["no_front",    "缺正面照片", "/items?__draft=1"],
+  ["no_back",     "缺背面照片", "/items?__draft=1"],
+  ["no_name",     "没有名称", "/items?__draft=1"],
+  ["no_year",     "没有纪年", "/items?__draft=1"],
+  ["no_grade",    "没有评级信息（裸币正常）", "/items"],
+  ["dup_photos",  "疑似重复照片组", "/items"],
+];
+(async () => {
+  const d = await j('/api/health-report');
+  $('#bar').innerHTML = `<span>共 <b>${d.no_location + d.no_front + d.no_name}</b>+ 项待完善</span>`;
+  const tb = document.querySelector('#tbl tbody');
+  for(const [key, label, link] of ROWS){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${label}</td>
+      <td class="${d[key] ? 'badc' : 'okc'}"><b>${d[key]}</b></td>
+      <td><a href="${link}">去处理 →</a></td>`;
+    tb.appendChild(tr);
+  }
+})();
+</script>
+{% endblock %}

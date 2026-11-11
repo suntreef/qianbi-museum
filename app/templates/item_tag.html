@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>藏品展签</title>
+<style>
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; margin: 24px; color: #222; }
+  .tag { border: 2px solid #333; border-radius: 12px; padding: 16px;
+         display: flex; gap: 16px; max-width: 620px; align-items: center; }
+  .tag img { width: 120px; height: 120px; object-fit: contain; }
+  .tag .photo { width: 120px; height: 120px; object-fit: cover; border: 1px solid #ccc; }
+  .info { flex: 1; }
+  .info h2 { margin: 0 0 6px; font-size: 20px; }
+  .info .code { color: #666; font-size: 13px; margin-bottom: 8px; }
+  .info .meta { font-size: 14px; line-height: 1.6; color: #444; }
+  .hint { color: #888; font-size: 12px; margin-top: 8px; }
+  .noprint { margin-bottom: 14px; }
+  @media print { .noprint { display: none; } body { margin: 8mm; } }
+</style>
+</head>
+<body>
+<div class="noprint">
+  <button onclick="window.print()">🖨 打印展签（扫码即看导览页）</button>
+  <a href="/items/{{ item_id }}">← 返回档案</a>
+</div>
+<div class="tag" id="tag"></div>
+<p class="hint">提示：二维码指向馆内导览页，观众手机需与 NAS 在同一网络（或经组网工具）才能打开。</p>
+
+<script>
+const ID = {{ item_id }};
+fetch('/api/items/' + ID).then(r => r.json()).then(d => {
+  const qrUrl = location.origin + '/pub/item/' + encodeURIComponent(d.item_code);
+  const photo = (d.photos || []).find(p => p.origin === 'archive') || (d.photos || [])[0];
+  document.getElementById('tag').innerHTML = `
+    <img src="/api/qr?text=${encodeURIComponent(qrUrl)}" alt="二维码">
+    <div class="info">
+      <h2>${(d.name || '未命名').replace(/</g, '&lt;')}</h2>
+      <div class="code">${d.item_code || ''}</div>
+      <div class="meta">
+        ${[d.dynasty, d.bank, d.note_type, d.era, d.denomination,
+           d.year_text, d.grade_co && (d.grade_co + ' ' + (d.grade_raw||''))]
+          .filter(Boolean).map(s => String(s).replace(/</g, '&lt;')).join(' · ') || ''}
+      </div>
+    </div>
+    ${photo ? `<img class="photo" src="${photo.url}">` : ''}`;
+  document.title = '展签 ' + (d.item_code || '');
+});
+</script>
+</body>
+</html>

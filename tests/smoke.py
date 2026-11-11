@@ -13,6 +13,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.environ["DATA_DIR"] = os.path.join(tempfile.gettempdir(), "qianbi-smoke-test")
+os.environ["FETCH_INTERVAL_SECONDS"] = "0.5"   # 测试加速：抓取限频缩短
 shutil.rmtree(os.environ["DATA_DIR"], ignore_errors=True)
 
 from PIL import Image  # noqa: E402
@@ -310,5 +311,50 @@ with TestClient(app) as c:
     check("录入员库位页被拒", staff.get("/locations", follow_redirects=False).status_code == 303)
     check("录入员盘点页", staff.get("/inventory").status_code == 200)
     check("只读用户盘点被拒", viewer.get("/inventory", follow_redirects=False).status_code == 303)
+
+    # ---------- 批量识别队列（真实后台线程） ----------
+    import time as _time
+    ing.qr.decode_qr = lambda p: "https://fake-cert.example.com/cert/888999000"
+    bp1 = os.path.join(os.environ["DATA_DIR"], "b1.jpg")
+    bp2 = os.path.join(os.environ["DATA_DIR"], "b2.jpg")
+    Image.new("RGB", (300, 200), "blue").save(bp1)
+    Image.new("RGB", (300, 200), "green").save(bp2)
+    r = c.post("/api/batch", files=[
+        ("files", ("b1.jpg", open(bp1, "rb").read(), "image/jpeg")),
+        ("files", ("b2.jpg", open(bp2, "rb").read(), "image/jpeg")),
+    ]).json()
+    check("批量-建任务", r["ok"] and r["queued"] == 2, str(r))
+    job = None
+    for _ in range(60):
+        job = c.get(f"/api/batch/{r['job_id']}").json()
+        if job["job"]["status"] == "done":
+            break
+        _time.sleep(0.5)
+    check("批量-后台跑完", job["job"]["status"] == "done", str(job["job"]))
+    check("批量-1新1重", job["job"]["ok"] == 1 and job["job"]["dup"] == 1,
+          f"ok={job['job']['ok']} dup={job['job']['dup']}")
+
+    r = c.get("/api/qr", params={"text": "hello"})
+    check("二维码生成", r.status_code == 200 and r.headers["content-type"] == "image/png")
+
+    code = c.get(f"/api/items/{iid}").json()["item_code"]
+    pub = c.get(f"/api/pub/item/{code}").json()
+    check("游客导览数据(脱敏)", pub.get("name")
+          and "purchase_price" not in pub and "location_id" not in pub,
+          str(sorted(pub.keys())))
+    check("游客导览页", c.get(f"/pub/item/{code}").status_code == 200)
+    check("展签页", c.get(f"/items/{iid}/tag").status_code == 200)
+
+    hr = c.get("/api/health-report").json()
+    check("档案体检", all(k in hr for k in ("no_location", "no_front", "dup_photos")),
+          str({k: hr[k] for k in ("no_location", "no_front")}))
+    check("体检页", c.get("/checkup").status_code == 200)
+
+    ev = c.get("/api/events").json()
+    check("全局日志", isinstance(ev, list) and len(ev) >= 1, f"n={len(ev)}")
+    check("日志页", c.get("/logs").status_code == 200)
+    check("批量页", c.get("/batch").status_code == 200)
+    check("录入员批量页", staff.get("/batch").status_code == 200)
+    check("只读用户批量被拒", viewer.get("/batch", follow_redirects=False).status_code == 303)
 
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

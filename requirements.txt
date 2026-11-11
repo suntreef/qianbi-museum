@@ -1,11 +1,14 @@
-fastapi
-uvicorn[standard]
-jinja2
-python-multipart
-httpx
-pillow
-zxing-cpp
-openai
-openpyxl
-# 本地免费 OCR（CPU 友好，中文标签识别够用，不调外部 API）
+# 版本锁定：保证 NAS 上任何时间构建都和当前测试过的版本一致
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+jinja2==3.1.6
+python-multipart==0.0.32
+httpx==0.28.1
+pillow==12.3.0
+zxing-cpp==3.1.1
+openai==3.49.0
+openpyxl==3.1.5
+qrcode==8.2
+# 本地免费 OCR（CPU 友好，中文标签识别够用）：不锁版本，
+# 有 try/except 降级保护，即使未来版本变化也不影响主流程
 rapidocr-onnxruntime

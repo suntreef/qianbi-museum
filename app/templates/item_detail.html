@@ -32,6 +32,7 @@
   <div class="btns">
     <button class="primary" id="save">💾 保存修改</button>
     <a class="btnlink" id="printLink" href="/items/{{ item_id }}/print" target="_blank">🖨 打印档案卡</a>
+    <a class="btnlink" href="/items/{{ item_id }}/tag" target="_blank">🏷 打印展签</a>
     {% if user and user.role == 'admin' %}<button id="del" style="background:#a03e2d;color:#fff">🗑 删除此档案</button>{% endif %}
     <a class="btnlink" href="/items">← 返回列表</a>
   </div>

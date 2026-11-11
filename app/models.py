@@ -132,6 +132,30 @@ CREATE TABLE IF NOT EXISTS event (
     created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_event_item ON event(item_id);
+
+-- 批量识别任务：照片排队，后台线程限速逐张跑（人可以先走）
+CREATE TABLE IF NOT EXISTS batch_job (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_by TEXT,
+    total      INTEGER NOT NULL DEFAULT 0,
+    done       INTEGER NOT NULL DEFAULT 0,
+    ok         INTEGER NOT NULL DEFAULT 0,
+    dup        INTEGER NOT NULL DEFAULT 0,
+    fail       INTEGER NOT NULL DEFAULT 0,
+    status     TEXT NOT NULL DEFAULT 'running',   -- running/done
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS batch_item (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id   INTEGER NOT NULL REFERENCES batch_job(id),
+    filename TEXT,
+    path     TEXT,
+    status   TEXT NOT NULL DEFAULT 'pending',     -- pending/ok/dup/fail
+    item_id  INTEGER,
+    message  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_batch_item_job ON batch_item(job_id, status);
 """
 
 # 全文检索表（trigram 分词，中文子串友好）。建不出来（老 SQLite）自动降级 LIKE。

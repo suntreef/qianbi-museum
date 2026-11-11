@@ -21,6 +21,22 @@ BUILTIN_DOMAINS = {
     "airmb.com": "爱藏",            # 证书查询 pj.airmb.com/dc/search（实测可达）
 }
 
+# 证书查询页：二维码读不出/解析失败时，给采集员一个"手工查询"直达链接
+QUERY_URLS = {
+    "国标": "http://api.cfcr.org.cn",
+    "公博": "https://www.gongbocoins.com/search",
+    "华夏": "https://www.huaxiapj.com/querySendItem.html",
+    "闻德": "http://wendepj.com",
+    "爱藏": "https://pj.airmb.com/dc/search",
+    "PMG": "https://www.pmgnotes.com/PMG/cert/",
+    "NGC": "https://www.ngccoin.com/certlookup/",
+    "PCGS": "https://www.pcgs.com/cert",
+}
+
+
+def lookup_url_for(company: Optional[str]) -> Optional[str]:
+    return QUERY_URLS.get(company or "")
+
 
 def _host(url: str) -> Optional[str]:
     try:
