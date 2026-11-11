@@ -112,6 +112,7 @@ async function handleLabelFiles(files){
 }
 
 async function fillSelect(sel, options, value){
+  sel.innerHTML = '<option value="">（未填）</option>';   // 空值默认，防止误存第一项
   for(const o of options){
     const op = document.createElement('option');
     op.value = o; op.textContent = o;

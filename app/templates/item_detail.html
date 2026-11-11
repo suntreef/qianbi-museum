@@ -91,6 +91,7 @@ async function buildForm(d){
     wrap.textContent = label;
     const sel = document.createElement('select');
     sel.id = 'f_' + f;
+    sel.innerHTML = '<option value="">（未填）</option>';   // 空值默认，防止误存第一项
     const list = await j('/api/dict/' + dtype);
     for(const o of list){
       const op = document.createElement('option');
