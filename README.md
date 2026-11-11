@@ -65,8 +65,15 @@ docker compose up -d --build
 - 自由文本搜索走 **SQLite FTS5 中文全文索引**（trigram 分词，3 字以上子串检索），
   十万级毫秒响应；不足 3 字自动降级 LIKE，老环境不支持 FTS 也自动降级
 - 全部 SQL 参数化（防注入）；列表页输出 HTML 转义（防 XSS）
-- 二维码只允许公网 http(s) 地址（防 SSRF 内网探测）；上传图片限 16MB 且服务端重新编码
+- 二维码只允许公网 http(s) 地址（防 SSRF 内网探测）；**重定向逐跳重新校验** + 域名解析 IP 校验（防 DNS 重绑定）
+- 照片 `shot_type` 服务端白名单（防路径穿越）；上传限 16MB 且服务端重新编码
+- 安全响应头：CSP / X-Frame-Options: DENY / nosniff / Referrer-Policy
+- 登录口令 pbkdf2 存储；连续输错 5 次锁定 IP 10 分钟；HTTPS 部署时设 `COOKIE_SECURE=1`
+- 游客导览页默认内网开放；需要限流时设 `PUB_TOKEN`，二维码链接须带 `?t=口令`
+- 库位树防环校验；批量上传限 60 张/次、总量 600MB
 - 单机 SQLite 到约 50 万条都很从容；之后可迁 PostgreSQL（字段设计已兼容）
+
+## 数据量与安全（旧版说明，同上）
 
 ## 成本说明
 

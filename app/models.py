@@ -176,10 +176,21 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str,
+                   column: str, ddl: str) -> None:
+    """极简 schema 迁移：缺列就补。以后升级加字段都用这个，老库平滑升级。"""
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def init_db() -> None:
     global FTS_OK
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # 平滑升级：老库补新列
+        _ensure_column(conn, "item", "send_express", "TEXT")   # 送评寄出单号
+        _ensure_column(conn, "item", "send_fee", "REAL")       # 送评费用
         try:
             conn.execute(FTS_DDL)
             FTS_OK = True

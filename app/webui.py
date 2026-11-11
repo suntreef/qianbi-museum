@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .auth import COOKIE, current_user, login_user, make_token
+from .config import COOKIE_SECURE, PUB_TOKEN
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -41,7 +42,7 @@ def login_submit(request: Request, username: str = Form(""), password: str = For
             status_code=401)
     resp = RedirectResponse("/capture", 303)
     resp.set_cookie(COOKIE, make_token(user["id"]), httponly=True,
-                    samesite="lax", max_age=30 * 86400)
+                    samesite="lax", max_age=30 * 86400, secure=COOKIE_SECURE)
     return resp
 
 
@@ -133,6 +134,8 @@ def item_tag_page(item_id: int, request: Request):
 @router.get("/pub/item/{code}")
 def pub_item_page(code: str, request: Request):
     """游客导览页（免登录，内网可访问），只展示脱敏字段。"""
+    if PUB_TOKEN and request.query_params.get("t") != PUB_TOKEN:
+        return RedirectResponse("/login", 303)
     return templates.TemplateResponse(request, "pub_item.html", {"code": code})
 
 

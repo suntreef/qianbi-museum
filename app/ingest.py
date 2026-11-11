@@ -24,6 +24,7 @@ FIELD_WHITELIST = [
     "year_text", "region", "grade_co", "cert_no", "cert_url",
     "grade_raw", "grade_scale", "serial_no",
     "source", "purchase_price", "purchase_date", "est_value", "est_date", "notes",
+    "send_express", "send_fee",
 ]
 
 
@@ -174,7 +175,7 @@ def create_manual(fields: dict) -> int:
 
 VALID_STATUS = ["draft", "in_stock", "reviewing", "exhibited",
                 "lent", "consigned", "sold", "lost"]
-_NUMERIC_FIELDS = ("purchase_price", "est_value")
+_NUMERIC_FIELDS = ("purchase_price", "est_value", "send_fee")
 
 
 def confirm_item(item_id: int, fields: dict, confirm: bool,

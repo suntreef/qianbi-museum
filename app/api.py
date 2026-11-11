@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import models
 from .auth import COOKIE, hash_password, login_user, make_token, require_role
-from .config import BATCH_DIR, PHOTO_DIR
+from .config import BATCH_DIR, COOKIE_SECURE, PHOTO_DIR, PUB_TOKEN
 from .ingest import attach_photo, confirm_item, create_manual, ingest_label
 from .models import get_conn
 
@@ -47,6 +47,7 @@ EXPORT_COLS = [
     ("grade_raw", "分数"), ("grade_scale", "分数制"), ("serial_no", "冠字号"),
     ("status", "状态"), ("source", "来源"), ("purchase_price", "采购价"),
     ("purchase_date", "采购日期"), ("est_value", "估值"), ("est_date", "估值日期"),
+    ("send_express", "送评单号"), ("send_fee", "送评费用"),
     ("notes", "备注"), ("created_at", "录入时间"),
 ]
 
@@ -80,7 +81,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         raise HTTPException(401, "用户名或口令不对（连续失败将临时锁定）")
     resp = _json({"ok": True, "role": user["role"]})
     resp.set_cookie(COOKIE, make_token(user["id"]), httponly=True,
-                    samesite="lax", max_age=30 * 86400)
+                    samesite="lax", max_age=30 * 86400, secure=COOKIE_SECURE)
     return resp
 
 
@@ -482,7 +483,7 @@ def export_xlsx(_: dict = Depends(require_admin)):
         ws.append([d[c[0]] for c in EXPORT_COLS])
     for i, w in enumerate((14, 30, 9, 12, 16, 11, 16, 10, 9, 12, 10, 14, 8,
                            14, 10, 12, 10, 18, 10, 8, 14, 8, 8, 10, 12, 10,
-                           10, 12, 26, 20), start=1):
+                           10, 12, 12, 10, 26, 20), start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     buf = io.BytesIO()
     wb.save(buf)
@@ -537,6 +538,14 @@ def rename_location(loc_id: int, p: LocationPayload, _: dict = Depends(require_a
     if p.parent_id == loc_id:
         raise HTTPException(400, "不能把自己设为上级")
     with get_conn() as conn:
+        # 防环：新上级不能是自己的后代（否则树会成死循环）
+        walk = p.parent_id
+        while walk is not None:
+            if walk == loc_id:
+                raise HTTPException(400, "不能把库位移到它自己的下级下面")
+            row = conn.execute("SELECT parent_id FROM location WHERE id=?",
+                               (walk,)).fetchone()
+            walk = row["parent_id"] if row else None
         cur = conn.execute("UPDATE location SET name=?, parent_id=? WHERE id=?",
                            (p.name.strip(), p.parent_id, loc_id))
         if cur.rowcount == 0:
@@ -695,10 +704,14 @@ async def append_batch(job_id: int, files: List[UploadFile] = File(...),
     return {"ok": True, "job_id": job_id, "queued": queued}
 
 
+MAX_BATCH_BYTES = 600 * 1024 * 1024   # 单次批量上传总大小上限
+
+
 async def _save_batch_files(job_id: int, files: List[UploadFile]) -> int:
     d = BATCH_DIR / str(job_id)
     d.mkdir(parents=True, exist_ok=True)
     queued = 0
+    total_bytes = 0
     with get_conn() as conn:
         for i, f in enumerate(files):
             try:
@@ -707,6 +720,9 @@ async def _save_batch_files(job_id: int, files: List[UploadFile]) -> int:
                 data = await f.read()
                 if not data or len(data) > UPLOAD_MAX:
                     continue
+                if total_bytes + len(data) > MAX_BATCH_BYTES:
+                    break
+                total_bytes += len(data)
                 path = d / f"{_dt.now():%H%M%S}_{i:03d}.jpg"
                 path.write_bytes(data)
                 conn.execute(
@@ -768,7 +784,10 @@ PUB_FIELDS = ("item_code", "name", "category", "series", "dynasty", "bank",
 
 
 @router.get("/pub/item/{code}")
-def pub_item(code: str):
+def pub_item(code: str, request: Request):
+    if PUB_TOKEN and request.query_params.get("t") != PUB_TOKEN:
+        # 配置了导览口令（PUB_TOKEN）时，必须带 ?t=口令 才能访问
+        raise HTTPException(404, "未找到该藏品")
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM item WHERE item_code=?",
                            (code.strip(),)).fetchone()

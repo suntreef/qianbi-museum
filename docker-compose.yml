@@ -18,4 +18,8 @@ services:
       - LLM_MODEL=glm-4v-flash
       # 证书页抓取限频（秒/次），礼貌爬取避免封禁
       - FETCH_INTERVAL_SECONDS=4
+      # 游客导览页口令：留空=展柜扫码直接可看；设了值则二维码链接需带 ?t=口令
+      - PUB_TOKEN=
+      # 部署 HTTPS（反向代理）后设为 1，Cookie 加 Secure
+      - COOKIE_SECURE=
       - TZ=Asia/Shanghai

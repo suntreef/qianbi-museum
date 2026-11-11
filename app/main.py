@@ -1,7 +1,8 @@
 """FastAPI 入口：API 路由 + 页面路由 + 静态资源 + 照片访问。"""
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from . import models
@@ -24,6 +25,21 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="钱币博物馆藏品入库系统", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp: Response = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+    return resp
+
+
 app.include_router(web_router)
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

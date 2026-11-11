@@ -65,6 +65,9 @@ const $ = s => document.querySelector(s);
 const STATUS = {draft:'草稿', in_stock:'在库', reviewing:'送评中', exhibited:'展出中',
   lent:'借出', consigned:'寄售', sold:'已售', lost:'丢失'};
 
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 const SELECTS = [
   ['category','品类','category'], ['series','系列','series'], ['dynasty','朝代','dynasty'],
   ['bank','发行机构','bank'], ['note_type','券种/类型','note_type'], ['printer','印刷厂','printer'],
@@ -74,6 +77,7 @@ const TEXTS = [
   ['name','名称'], ['era','年号/品种'], ['denomination','面值'], ['variety','版别'],
   ['year_text','纪年'], ['region','地域'], ['grade_raw','分数'], ['grade_scale','分数制'],
   ['serial_no','冠字号'], ['cert_no','评级编号'], ['notes','备注'],
+  ['send_express','送评寄出单号'], ['send_fee','送评费用'],
 ];
 
 async function j(url, opt){
@@ -130,8 +134,8 @@ async function buildForm(d){
   const tb = document.querySelector('#events tbody');
   for(const e of (d.events || [])){
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${e.created_at||''}</td><td>${e.kind||''}</td>
-      <td>${(e.detail||'').replace(/</g,'&lt;')}</td><td>${e.operator||''}</td>`;
+    tr.innerHTML = `<td>${esc(e.created_at)}</td><td>${esc(e.kind)}</td>
+      <td>${esc(e.detail)}</td><td>${esc(e.operator)}</td>`;
     tb.appendChild(tr);
   }
 }

@@ -10,6 +10,8 @@ from PIL import Image
 from ..config import PHOTO_DIR
 
 MAX_DIM = 2000
+# 白名单：既防手滑，也防 shot_type 拼进文件名造成路径穿越
+SHOT_TYPES = ("front", "back", "edge", "detail", "label", "holder", "reference")
 
 
 def ahash(img: Image.Image) -> Optional[str]:
@@ -39,6 +41,8 @@ def _exif_time(img: Image.Image) -> Optional[str]:
 def save_image(data: bytes, item_id: int, shot_type: str,
                origin: str = "archive") -> Optional[dict]:
     """保存一张照片，返回 photo 表字段 dict；图片无效返回 None。"""
+    if shot_type not in SHOT_TYPES:   # 不在白名单一律按"局部"处理，杜绝路径穿越
+        shot_type = "detail"
     try:
         img = Image.open(io.BytesIO(data))
         img.load()

@@ -25,6 +25,12 @@ FETCH_INTERVAL_SECONDS = float(os.environ.get("FETCH_INTERVAL_SECONDS", "4"))
 # 藏品编号前缀，如 M-2026-0001
 ITEM_CODE_PREFIX = os.environ.get("ITEM_CODE_PREFIX", "M")
 
+# 游客导览页口令：留空 = 内网直接可看（展柜扫码场景）；设了值则需 ?t=口令
+PUB_TOKEN = os.environ.get("PUB_TOKEN", "")
+
+# 部署了 HTTPS（如经反向代理）时设为 1，Cookie 加 Secure 标记
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "") == "1"
+
 # 静态资源目录（随代码打包，不在数据盘）
 STATIC_DIR = Path(__file__).parent / "static"
 

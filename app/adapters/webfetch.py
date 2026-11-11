@@ -1,9 +1,17 @@
-"""限频抓取证书页：SSRF 防护、文本提取、图片 URL 提取、图片下载。"""
+"""限频抓取证书页：SSRF 防护（含重定向逐跳校验 + DNS 解析校验）、文本/图片提取。
+
+安全设计：
+- 只允许公网 http(s) 地址，拒绝内网/环回/链路本地字面量
+- 域名解析出的每个 IP 都必须是公网（防 DNS 重绑定指向内网）
+- 重定向不自动跟随：每一跳重新过公网校验，最多 3 跳
+- 响应体限量读取；图片过滤明显的站点装饰资源
+"""
+import ipaddress
 import re
+import socket
 import time
 from typing import Optional
 from urllib.parse import urljoin, urlparse
-import ipaddress
 
 import httpx
 
@@ -13,11 +21,34 @@ _UA = {"User-Agent": "Mozilla/5.0 (compatible; QianbiMuseum/0.1; private museum 
 _TIMEOUT = 15.0
 _MAX_HTML_BYTES = 3_000_000
 _MAX_IMG_BYTES = 8_000_000
+_MAX_REDIRECTS = 3
 
 _last_fetch = 0.0
 _img_re = re.compile(
     r"""<img[^>]+src\s*=\s*["']([^"']+)["']""", re.I)
 _junk_img = re.compile(r"(head|logo|icon|banner|btn|/bg|_bg|qrcode?)", re.I)
+
+
+def _ip_is_public(ip: ipaddress.IPv4Address) -> bool:
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast)
+
+
+def _host_ok(host: str) -> bool:
+    if host == "localhost" or host.endswith(".local") or host.endswith(".internal"):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+        return _ip_is_public(ip)
+    except ValueError:
+        # 域名：解析出的每个 IP 都必须是公网（防 DNS 重绑定）
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except OSError:
+            return False
+        if not infos:
+            return False
+        return all(_ip_is_public(ipaddress.ip_address(info[4][0])) for info in infos)
 
 
 def is_public_url(url: str) -> bool:
@@ -28,15 +59,7 @@ def is_public_url(url: str) -> bool:
         return False
     if u.scheme not in ("http", "https") or not u.hostname:
         return False
-    host = u.hostname.lower()
-    if host == "localhost" or host.endswith(".local") or host.endswith(".internal"):
-        return False
-    try:
-        ip = ipaddress.ip_address(host)
-        return not (ip.is_private or ip.is_loopback or ip.is_link_local
-                    or ip.is_reserved or ip.is_multicast)
-    except ValueError:
-        return True  # 普通域名
+    return _host_ok(u.hostname.lower())
 
 
 def _throttle() -> None:
@@ -47,24 +70,25 @@ def _throttle() -> None:
     _last_fetch = time.time()
 
 
-def fetch_page(url: str) -> Optional[dict]:
-    """限频抓取页面，返回 {url_final, html}；失败/非公网返回 None。"""
-    if not is_public_url(url):
+def fetch_page(url: str, depth: int = 0) -> Optional[dict]:
+    """限频抓取页面，返回 {url_final, html}；失败/非公网/重定向过深返回 None。"""
+    if depth > _MAX_REDIRECTS or not is_public_url(url):
         return None
     _throttle()
     try:
-        with httpx.Client(headers=_UA, timeout=_TIMEOUT, follow_redirects=True) as c:
-            with c.stream("GET", url) as resp:
-                if resp.status_code != 200:
-                    return None
-                final_url = str(resp.url)
-                chunks, total = [], 0
-                for chunk in resp.iter_bytes():
-                    total += len(chunk)
-                    chunks.append(chunk)
-                    if total >= _MAX_HTML_BYTES:
-                        break
-        return {"url_final": final_url, "html": b"".join(chunks).decode("utf-8", "replace")}
+        with httpx.Client(headers=_UA, timeout=_TIMEOUT,
+                          follow_redirects=False) as c:
+            resp = c.get(url)
+            if resp.is_redirect:
+                nxt = urljoin(url, resp.headers.get("location", ""))
+                resp.close()
+                return fetch_page(nxt, depth + 1)   # 每一跳重新过公网校验
+            if resp.status_code != 200:
+                return None
+            html = resp.text
+            if len(html) > _MAX_HTML_BYTES:
+                html = html[:_MAX_HTML_BYTES]
+        return {"url_final": str(resp.url), "html": html}
     except Exception:
         return None
 
@@ -89,13 +113,18 @@ def extract_image_urls(html: str, base_url: str, limit: int = 6) -> list:
     return urls
 
 
-def fetch_image(url: str) -> Optional[bytes]:
-    if not is_public_url(url):
+def fetch_image(url: str, depth: int = 0) -> Optional[bytes]:
+    if depth > _MAX_REDIRECTS or not is_public_url(url):
         return None
     _throttle()
     try:
-        with httpx.Client(headers=_UA, timeout=_TIMEOUT, follow_redirects=True) as c:
+        with httpx.Client(headers=_UA, timeout=_TIMEOUT,
+                          follow_redirects=False) as c:
             resp = c.get(url)
+            if resp.is_redirect:
+                nxt = urljoin(url, resp.headers.get("location", ""))
+                resp.close()
+                return fetch_image(nxt, depth + 1)
             if resp.status_code != 200 or len(resp.content) > _MAX_IMG_BYTES:
                 return None
             return resp.content

@@ -127,6 +127,9 @@ with TestClient(app) as c:
 
     # ---------- 录入流水线（伪造证书页） ----------
     import app.ingest as ing
+    _real_qr = ing.qr.decode_qr
+    _real_fetch = ing.webfetch.fetch_page
+    _real_ocr = ing.ocr.read_text
     fake_url = "https://fake-cert.example.com/cert/777666555"
     ing.qr.decode_qr = lambda p: fake_url
     ing.webfetch.fetch_page = lambda u: {
@@ -148,6 +151,8 @@ with TestClient(app) as c:
     check("流水线-编号判重拦截",
           res2.get("dupe") is True and res2["existing"]["id"] == res["item_id"],
           str(res2.get("existing", {}).get("id")))
+
+    ing.webfetch.fetch_page = _real_fetch   # 还原：别污染后面的 SSRF 安全测试
 
     ing.qr.decode_qr = lambda p: None
     plain = os.path.join(os.environ["DATA_DIR"], "plain.jpg")
@@ -315,6 +320,9 @@ with TestClient(app) as c:
     # ---------- 批量识别队列（真实后台线程） ----------
     import time as _time
     ing.qr.decode_qr = lambda p: "https://fake-cert.example.com/cert/888999000"
+    ing.webfetch.fetch_page = lambda u: {
+        "url_final": u,
+        "html": "<html><body>Central Bank of China Gold Yuan 1947 MS 63 EPQ</body></html>"}
     bp1 = os.path.join(os.environ["DATA_DIR"], "b1.jpg")
     bp2 = os.path.join(os.environ["DATA_DIR"], "b2.jpg")
     Image.new("RGB", (300, 200), "blue").save(bp1)
@@ -333,6 +341,9 @@ with TestClient(app) as c:
     check("批量-后台跑完", job["job"]["status"] == "done", str(job["job"]))
     check("批量-1新1重", job["job"]["ok"] == 1 and job["job"]["dup"] == 1,
           f"ok={job['job']['ok']} dup={job['job']['dup']}")
+    ing.qr.decode_qr = _real_qr
+    ing.webfetch.fetch_page = _real_fetch
+    ing.ocr.read_text = _real_ocr   # 全部还原，安全测试用真实现
 
     r = c.get("/api/qr", params={"text": "hello"})
     check("二维码生成", r.status_code == 200 and r.headers["content-type"] == "image/png")
@@ -356,5 +367,63 @@ with TestClient(app) as c:
     check("批量页", c.get("/batch").status_code == 200)
     check("录入员批量页", staff.get("/batch").status_code == 200)
     check("只读用户批量被拒", viewer.get("/batch", follow_redirects=False).status_code == 303)
+
+    # ---------- 安全审计修复回归 ----------
+    # 1) shot_type 路径穿越拦截（恶意值必须被白名单降级）
+    r = c.post(f"/api/items/{iid4}/photos",
+               files={"photo": ("x.jpg", buf.getvalue(), "image/jpeg")},
+               data={"shot_type": "../../evil"})
+    check("安全-上传不报错", r.json().get("ok") is True)
+    d = c.get(f"/api/items/{iid4}").json()
+    outside = [p for p in d["photos"] if ".." in (p.get("file_path") or "")]
+    bad_types = [p for p in d["photos"] if p["shot_type"] not in
+                 ("front", "back", "edge", "detail", "label", "holder", "reference")]
+    check("安全-shot_type白名单", not outside and not bad_types,
+          str([p["shot_type"] for p in d["photos"]]))
+
+    # 2) SSRF：重定向逐跳校验（伪造 302 跳内网必须被拦）
+    class _FakeResp:
+        is_redirect = True
+        status_code = 302
+        headers = {"location": "http://127.0.0.1:9000/secret"}
+        url = "https://example.com/a"
+        def close(self): pass
+    class _FakeClient:
+        def __init__(self, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, u): return _FakeResp()
+    _orig_client = ing.webfetch.httpx.Client
+    ing.webfetch.httpx.Client = _FakeClient
+    try:
+        check("安全-SSRF重定向拦截",
+              ing.webfetch.fetch_page("https://example.com/a") is None)
+        check("安全-SSRF图片重定向拦截",
+              ing.webfetch.fetch_image("https://example.com/a.jpg") is None)
+    finally:
+        ing.webfetch.httpx.Client = _orig_client
+    check("安全-内网字面量拦截", not ing.webfetch.is_public_url("http://192.168.1.5/x"))
+    check("安全-环回拦截", not ing.webfetch.is_public_url("http://localhost/x"))
+
+    # 3) 库位防环
+    la = c.post("/api/locations", json={"name": "环测试A"}).json()["id"]
+    lb = c.post("/api/locations",
+                json={"name": "环测试B", "parent_id": la}).json()["id"]
+    check("安全-库位防环", c.put(f"/api/locations/{la}", json={
+        "name": "环测试A", "parent_id": lb}).status_code == 400)
+    c.delete(f"/api/locations/{lb}")
+    c.delete(f"/api/locations/{la}")
+
+    # 4) 安全响应头
+    r = c.get("/api/health")
+    check("安全-响应头", r.headers.get("x-content-type-options") == "nosniff"
+          and "default-src 'self'" in r.headers.get("content-security-policy", ""))
+
+    # 5) 送评字段
+    c.post(f"/api/items/{iid}", json={
+        "fields": {"send_express": "SF001", "send_fee": 25}})
+    d = c.get(f"/api/items/{iid}").json()
+    check("送评字段", d.get("send_express") == "SF001" and d.get("send_fee") == 25,
+          str((d.get("send_express"), d.get("send_fee"))))
 
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")
