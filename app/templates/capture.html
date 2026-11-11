@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="actions">
+  <label class="bigbtn primary">📷 拍评级标签（可连拍多件）
+    <input type="file" accept="image/*" capture="environment" multiple hidden id="labelInput">
+  </label>
+  <button class="bigbtn" id="manualBtn">✍️ 手动录入（无标签/裸币）</button>
+</section>
+<p class="hint">拍完标签出一张确认卡：核对信息 → 拍正反面 → 点「确认入库」。
+识别不出的字段先空着，管理员后台补——宁空勿错。</p>
+<div id="queue"></div>
+
+<template id="cardTpl">
+  <div class="card">
+    <div class="card-head">
+      <span class="badge"></span>
+      <a class="certlink" hidden target="_blank" rel="noopener">证书页 ↗</a>
+    </div>
+    <div class="grid">
+      <label>品类<select name="category"></select></label>
+      <label>系列<select name="series"></select></label>
+      <label>发行机构<select name="bank"></select></label>
+      <label>券种/类型<select name="note_type"></select></label>
+      <label>文书类型<select name="doc_type"></select></label>
+      <label>印刷厂<select name="printer"></select></label>
+      <label>朝代(古钱)<select name="dynasty"></select></label>
+      <label>评级公司<select name="grade_co"></select></label>
+      <label>分数制<select name="grade_scale"></select></label>
+      <label>来源<select name="source"></select></label>
+      <label>名称<input data-field="name"></label>
+      <label>面值<input data-field="denomination"></label>
+      <label>年号/品种<input data-field="era"></label>
+      <label>版别<input data-field="variety"></label>
+      <label>纪年<input data-field="year_text" placeholder="民国三十六年 / 光绪十八年"></label>
+      <label>地域<input data-field="region" placeholder="地契等：山西·平遥"></label>
+      <label>分数原文<input data-field="grade_raw"></label>
+      <label>冠字号<input data-field="serial_no"></label>
+      <label>备注<input data-field="notes"></label>
+    </div>
+    <div class="photos">
+      <label class="shotbtn">📷 正面
+        <input class="front-inp" type="file" accept="image/*" capture="environment" hidden>
+        <img class="front-img" hidden alt="">
+      </label>
+      <label class="shotbtn">📷 背面
+        <input class="back-inp" type="file" accept="image/*" capture="environment" hidden>
+        <img class="back-img" hidden alt="">
+      </label>
+    </div>
+    <div class="warn" data-warn="front" hidden></div>
+    <div class="warn" data-warn="back" hidden></div>
+    <div class="btns">
+      <button class="primary confirm">✅ 确认入库</button>
+      <button class="skip">⏭ 跳过</button>
+    </div>
+  </div>
+</template>
+
+<script>
+const $ = s => document.querySelector(s);
+const DICT_FIELDS = {category:'category', series:'series', dynasty:'dynasty',
+  bank:'bank', note_type:'note_type', printer:'printer', doc_type:'doc_type',
+  grade_co:'grade_co'};
+const FIXED = {grade_scale:['70制','85制','描述'], source:['购入','捐赠','代管','交换','其他']};
+const BADGE = {qr_cert:'✅ 二维码证书', ocr_label:'🔍 标签OCR', none:'⏳ 未识别'};
+const dictCache = {};
+
+async function loadDict(t){
+  if(!dictCache[t]){
+    const r = await fetch('/api/dict/'+t);
+    if(r.status===401) return location='/login';
+    dictCache[t] = (await r.json()).map(x=>x.name);
+  }
+  return dictCache[t];
+}
+function toast(msg, ok=true){
+  const d = document.createElement('div');
+  d.className = 'toast' + (ok ? '' : ' bad');
+  d.textContent = msg;
+  document.body.appendChild(d);
+  setTimeout(()=>d.remove(), 5000);
+}
+async function upload(file, url, extra){
+  const fd = new FormData();
+  fd.append('photo', file);
+  for(const k in (extra||{})) fd.append(k, extra[k]);
+  const r = await fetch(url, {method:'POST', body:fd});
+  if(r.status===401){ location='/login'; return null; }
+  return r.json();
+}
+
+async function handleLabelFiles(files){
+  for(const f of files){
+    toast('识别中：' + f.name);
+    const d = await upload(f, '/api/ingest/label');
+    if(!d) return;
+    if(d.dupe){
+      toast(`⚠️ 重复：编号 ${d.cert_no} 已入库（${d.existing.item_code||''} ${d.existing.name||''}）`, false);
+      continue;
+    }
+    if(d.ok) await addCard(d.item_id, d.fields, d);
+    else toast('识别失败，请重拍或手动录入', false);
+  }
+}
+
+async function fillSelect(sel, options, value){
+  for(const o of options){
+    const op = document.createElement('option');
+    op.value = o; op.textContent = o;
+    sel.appendChild(op);
+  }
+  if(value) sel.value = value;
+}
+
+async function addCard(id, f, meta){
+  const node = $('#cardTpl').content.cloneNode(true);
+  const card = node.querySelector('.card');
+  card.dataset.id = id;
+  card.querySelector('.badge').textContent =
+    (BADGE[meta.parsed_from] || '') + (meta.ref_photos ? ` · 官网参考图×${meta.ref_photos}` : '');
+  for(const key in DICT_FIELDS)
+    await fillSelect(card.querySelector(`[name="${key}"]`),
+                     await loadDict(DICT_FIELDS[key]), f[key]);
+  for(const key in FIXED)
+    await fillSelect(card.querySelector(`[name="${key}"]`), FIXED[key], f[key]);
+  card.querySelectorAll('input[data-field]').forEach(inp=>{
+    if(f[inp.dataset.field]) inp.value = f[inp.dataset.field];
+  });
+  if(meta.cert_url){
+    const a = card.querySelector('.certlink');
+    a.href = meta.cert_url; a.hidden = false;
+  }
+  if(meta.ref_photo_urls && meta.ref_photo_urls.length){
+    const row = document.createElement('div');
+    row.className = 'refrow';
+    row.innerHTML = '<span class="hint">官网图（无用可忽略，编辑页可删）：</span>';
+    for(const u of meta.ref_photo_urls){
+      const img = document.createElement('img');
+      img.src = u; img.className = 'refthumb';
+      row.appendChild(img);
+    }
+    card.insertBefore(row, card.querySelector('.photos'));
+  }
+  const shot = async (inp, type, imgEl, warnEl) => {
+    if(!inp.files[0]) return;
+    imgEl.src = URL.createObjectURL(inp.files[0]); imgEl.hidden = false;
+    const d = await upload(inp.files[0], `/api/items/${id}/photos`, {shot_type: type});
+    if(d && d.ok && d.similar && d.similar.length){
+      warnEl.textContent = '⚠️ 疑似已入库：' +
+        d.similar.map(s => `${s.item_code||s.item_id} ${s.name||''}`.trim()).join('；');
+      warnEl.hidden = false;
+    }
+  };
+  card.querySelector('.front-inp').onchange = e =>
+    shot(e.target, 'front', card.querySelector('.front-img'),
+         card.querySelector('[data-warn="front"]'));
+  card.querySelector('.back-inp').onchange = e =>
+    shot(e.target, 'back', card.querySelector('.back-img'),
+         card.querySelector('[data-warn="back"]'));
+  card.querySelector('.confirm').onclick = () => confirmCard(card, id);
+  card.querySelector('.skip').onclick = () => {
+    card.remove();
+    toast('已跳过（草稿保留，可在后台继续处理）');
+  };
+  $('#queue').prepend(node);
+}
+
+async function confirmCard(card, id){
+  const fields = {};
+  card.querySelectorAll('select[name]').forEach(el=>{ if(el.value) fields[el.name]=el.value; });
+  card.querySelectorAll('input[data-field]').forEach(el=>{
+    if(el.value) fields[el.dataset.field]=el.value;
+  });
+  const r = await fetch(`/api/items/${id}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({fields, confirm:true})
+  });
+  if(r.status===401) return location='/login';
+  const d = await r.json();
+  if(d.ok){ card.remove(); toast('✅ 已入库 ' + d.item_code); }
+  else toast('保存失败：' + (d.detail || d.error || ''), false);
+}
+
+$('#labelInput').onchange = e => { handleLabelFiles([...e.target.files]); e.target.value=''; };
+$('#manualBtn').onclick = async () => {
+  const r = await fetch('/api/items', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+  });
+  if(r.status===401) return location='/login';
+  const d = await r.json();
+  if(d.ok) addCard(d.item_id, {}, {parsed_from:'none', ref_photos:0});
+};
+</script>
+{% endblock %}

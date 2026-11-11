@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>钱币博物馆 · 藏品入库</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="logo">🏛️ 钱币博物馆</span>
+  <nav>
+    <a href="/capture">采集</a>
+    <a href="/items">藏品</a>
+    <a href="/dict">字典</a>
+    <a href="#" onclick="fetch('/api/logout',{method:'POST'}).finally(()=>location='/login')">退出</a>
+  </nav>
+</header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

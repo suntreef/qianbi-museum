@@ -1,0 +1,21 @@
+services:
+  qianbi:
+    build: .
+    container_name: qianbi-museum
+    restart: unless-stopped
+    ports:
+      - "8300:8000"
+    volumes:
+      # 全部数据（数据库+照片）都在这个目录，备份它即可
+      - ./data:/app/data
+    environment:
+      # 登录密码，务必修改
+      - APP_PASSWORD=changeme
+      # 大模型 API Key（可选：不填 = 纯免费本地路径，0 元跑通主流程；
+      # 可填智谱免费档 Key（免费模型如 glm-4v-flash），0 元启用增强功能）
+      - LLM_API_KEY=
+      - LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+      - LLM_MODEL=glm-4v-flash
+      # 证书页抓取限频（秒/次），礼貌爬取避免封禁
+      - FETCH_INTERVAL_SECONDS=4
+      - TZ=Asia/Shanghai

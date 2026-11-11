@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+httpx
+pillow
+zxing-cpp
+openai
+openpyxl
+# 本地免费 OCR（CPU 友好，中文标签识别够用，不调外部 API）
+rapidocr-onnxruntime

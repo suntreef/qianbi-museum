@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>字典管理</h2>
+<p class="hint">机构、券种、印刷厂等下拉选项在这里维护。遇到新的评级公司、银行、印厂，加一条即可，不用改代码。
+「cert_domain」类型用于登记评级公司证书页域名（名称=域名，别名=公司名）。</p>
+<section class="filters">
+  <select id="typeFilter">
+    <option value="">全部类型</option>
+    <option value="category">品类</option><option value="dynasty">朝代</option>
+    <option value="series">时代系列</option><option value="bank">发行机构</option>
+    <option value="note_type">券种</option><option value="printer">印刷厂</option>
+    <option value="doc_type">文书类型</option><option value="grade_co">评级公司</option>
+    <option value="material">材质</option><option value="cert_domain">证书域名</option>
+  </select>
+  <input id="kw" placeholder="筛选关键字" style="flex:1;min-width:140px">
+</section>
+<div class="filters addrow">
+  <select id="addType">
+    <option value="bank">发行机构</option><option value="note_type">券种</option>
+    <option value="printer">印刷厂</option><option value="doc_type">文书类型</option>
+    <option value="grade_co">评级公司</option><option value="series">时代系列</option>
+    <option value="dynasty">朝代</option><option value="category">品类</option>
+    <option value="material">材质</option><option value="cert_domain">证书域名</option>
+  </select>
+  <input id="addName" placeholder="名称（必填）" style="width:160px">
+  <input id="addAliases" placeholder="别名，逗号分隔（搜索用）" style="flex:1;min-width:160px">
+  <input id="addSort" type="number" value="50" style="width:70px" title="排序">
+  <button class="primary" id="addBtn">➕ 添加</button>
+</div>
+<table id="tbl">
+  <thead><tr><th>类型</th><th>名称</th><th>别名</th><th>排序</th><th></th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const $ = s => document.querySelector(s);
+const TYPE_CN = {category:'品类', dynasty:'朝代', series:'系列', bank:'机构',
+  note_type:'券种', printer:'印刷厂', doc_type:'文书', grade_co:'评级',
+  material:'材质', cert_domain:'域名'};
+
+async function j(url, opt){
+  const r = await fetch(url, opt);
+  if(r.status===401) return location='/login';
+  return r.json();
+}
+
+async function load(){
+  const all = await j('/api/dict-all');
+  const tf = $('#typeFilter').value, kw = $('#kw').value.trim();
+  const tb = $('#tbl tbody');
+  tb.innerHTML = '';
+  for(const e of all){
+    if(tf && e.type !== tf) continue;
+    if(kw && !(e.name+((e.aliases)||'')).includes(kw)) continue;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${TYPE_CN[e.type]||e.type}</td>
+      <td contenteditable class="ename">${e.name}</td>
+      <td contenteditable class="ealias">${e.aliases||''}</td>
+      <td contenteditable class="esort">${e.sort}</td>
+      <td><button class="mini save">保存</button> <button class="mini del">删</button></td>`;
+    tr.querySelector('.save').onclick = async () => {
+      const d = await j('/api/dict/' + e.id, {method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({type: e.type,
+          name: tr.querySelector('.ename').textContent.trim(),
+          aliases: tr.querySelector('.ealias').textContent.trim() || null,
+          sort: parseInt(tr.querySelector('.esort').textContent) || 50})});
+      if(d.ok) toast('已保存');
+    };
+    tr.querySelector('.del').onclick = async () => {
+      if(!confirm(`删除「${e.name}」？`)) return;
+      await j('/api/dict/' + e.id, {method:'DELETE'});
+      tr.remove();
+    };
+    tb.appendChild(tr);
+  }
+}
+
+function toast(msg){
+  const d = document.createElement('div');
+  d.className = 'toast'; d.textContent = msg;
+  document.body.appendChild(d);
+  setTimeout(()=>d.remove(), 3000);
+}
+
+$('#addBtn').onclick = async () => {
+  if(!$('#addName').value.trim()) return alert('名称必填');
+  const d = await j('/api/dict', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({type: $('#addType').value,
+      name: $('#addName').value.trim(),
+      aliases: $('#addAliases').value.trim() || null,
+      sort: parseInt($('#addSort').value) || 50})});
+  if(d.ok){ toast('已添加'); $('#addName').value=''; $('#addAliases').value=''; load(); }
+};
+$('#typeFilter').onchange = load;
+$('#kw').oninput = load;
+load();
+</script>
+{% endblock %}

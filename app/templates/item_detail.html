@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="detailhead">
+  <h2 id="title">藏品档案</h2>
+  <span class="hint" id="meta"></span>
+</div>
+<div class="card" id="formCard">
+  <div class="grid" id="grid"></div>
+  <div class="fieldrow">
+    <label>状态
+      <select id="status">
+        <option value="draft">草稿</option><option value="in_stock">在库</option>
+        <option value="reviewing">送评中</option><option value="exhibited">展出中</option>
+        <option value="lent">借出</option><option value="consigned">寄售</option>
+        <option value="sold">已售</option><option value="lost">丢失</option>
+      </select>
+    </label>
+    <label>来源
+      <select id="source"><option value=""></option><option>购入</option><option>捐赠</option>
+        <option>代管</option><option>交换</option><option>其他</option></select>
+    </label>
+    <label>采购价<input id="purchase_price" type="number" step="0.01"></label>
+    <label>采购日期<input id="purchase_date" type="date"></label>
+    <label>估值<input id="est_value" type="number" step="0.01"></label>
+    <label>估值日期<input id="est_date" type="date"></label>
+  </div>
+  <div class="btns">
+    <button class="primary" id="save">💾 保存修改</button>
+    <button id="del" style="background:#a03e2d;color:#fff">🗑 删除此档案</button>
+    <a class="btnlink" href="/items">← 返回列表</a>
+  </div>
+</div>
+
+<h3>照片</h3>
+<div class="photos" id="photoRow"></div>
+<div class="fieldrow">
+  <label>补拍/追加照片
+    <select id="shotType">
+      <option value="front">正面</option><option value="back">背面</option>
+      <option value="edge">边齿</option><option value="detail">局部</option>
+      <option value="label">标签</option><option value="holder">评级盒</option>
+    </select>
+  </label>
+  <label class="shotbtn" style="flex:1">📷 拍照上传
+    <input type="file" accept="image/*" capture="environment" hidden id="photoInput">
+  </label>
+</div>
+
+<script>
+const ID = {{ item_id }};
+const $ = s => document.querySelector(s);
+const STATUS = {draft:'草稿', in_stock:'在库', reviewing:'送评中', exhibited:'展出中',
+  lent:'借出', consigned:'寄售', sold:'已售', lost:'丢失'};
+
+const SELECTS = [
+  ['category','品类','category'], ['series','系列','series'], ['dynasty','朝代','dynasty'],
+  ['bank','发行机构','bank'], ['note_type','券种/类型','note_type'], ['printer','印刷厂','printer'],
+  ['doc_type','文书类型','doc_type'], ['grade_co','评级公司','grade_co'],
+];
+const TEXTS = [
+  ['name','名称'], ['era','年号/品种'], ['denomination','面值'], ['variety','版别'],
+  ['year_text','纪年'], ['region','地域'], ['grade_raw','分数'], ['grade_scale','分数制'],
+  ['serial_no','冠字号'], ['cert_no','评级编号'], ['notes','备注'],
+];
+
+async function j(url, opt){
+  const r = await fetch(url, opt);
+  if(r.status===401) return location='/login';
+  return r.json();
+}
+
+async function buildForm(d){
+  $('#title').textContent = d.item_code || ('草稿 #' + d.id);
+  $('#meta').textContent = `录入：${d.created_at||''} · 更新：${d.updated_at||''} · 证书页：${d.cert_url||'无'}`;
+  const grid = $('#grid');
+  for(const [f, label, dtype] of SELECTS){
+    const wrap = document.createElement('label');
+    wrap.textContent = label;
+    const sel = document.createElement('select');
+    sel.id = 'f_' + f;
+    const list = await j('/api/dict/' + dtype);
+    for(const o of list){
+      const op = document.createElement('option');
+      op.value = o.name; op.textContent = o.name;
+      sel.appendChild(op);
+    }
+    wrap.appendChild(sel);
+    grid.appendChild(wrap);
+  }
+  for(const [f, label] of TEXTS){
+    const wrap = document.createElement('label');
+    wrap.textContent = label;
+    const inp = document.createElement('input');
+    inp.id = 'f_' + f;
+    wrap.appendChild(inp);
+    grid.appendChild(wrap);
+  }
+  for(const [f, label] of SELECTS) if(d[f]) $('#f_'+f).value = d[f];
+  for(const [f] of TEXTS) if(d[f] !== null && d[f] !== undefined) $('#f_'+f).value = d[f];
+  if(d.status) $('#status').value = d.status;
+  if(d.source) $('#source').value = d.source;
+  for(const f of ['purchase_price','purchase_date','est_value','est_date'])
+    if(d[f] !== null && d[f] !== undefined) $('#'+f).value = d[f];
+}
+
+function renderPhotos(photos){
+  const row = $('#photoRow');
+  row.innerHTML = '';
+  if(!photos.length){ row.innerHTML = '<span class="hint">还没有照片</span>'; return; }
+  for(const p of photos){
+    const box = document.createElement('div');
+    box.className = 'photobox';
+    box.innerHTML = `<img src="${p.url}" loading="lazy">
+      <span class="ptag">${({front:'正面',back:'背面',edge:'边齿',detail:'局部',label:'标签',holder:'评级盒',reference:'官网图'})[p.shot_type]||p.shot_type}
+      ${p.origin==='reference'?'·参考':''}</span>`;
+    const del = document.createElement('button');
+    del.className = 'pdel'; del.textContent = '✕';
+    del.onclick = async () => {
+      if(!confirm('删除这张照片？')) return;
+      await j('/api/photos/' + p.id, {method:'DELETE'});
+      box.remove();
+    };
+    box.appendChild(del);
+    row.appendChild(box);
+  }
+}
+
+$('#save').onclick = async () => {
+  const fields = {};
+  for(const [f] of SELECTS){ const v = $('#f_'+f).value; if(v) fields[f]=v; }
+  for(const [f] of TEXTS){ fields[f] = $('#f_'+f).value || null; }
+  const payload = {fields, confirm:false, status:$('#status').value,
+    source:$('#source').value || null,
+    purchase_price:$('#purchase_price').value,
+    purchase_date:$('#purchase_date').value || null,
+    est_value:$('#est_value').value,
+    est_date:$('#est_date').value || null};
+  const d = await j(`/api/items/${ID}`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  alert(d.ok ? '✅ 已保存' : '保存失败');
+  if(d.ok) location.reload();
+};
+
+$('#del').onclick = async () => {
+  if(!confirm('确定删除整个档案？照片一并删除，不可恢复！')) return;
+  await j(`/api/items/${ID}`, {method:'DELETE'});
+  location = '/items';
+};
+
+$('#photoInput').onchange = async e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const fd = new FormData();
+  fd.append('photo', f);
+  fd.append('shot_type', $('#shotType').value);
+  await j(`/api/items/${ID}/photos`, {method:'POST', body: fd});
+  const d = await j(`/api/items/${ID}`);
+  renderPhotos(d.photos);
+  e.target.value = '';
+};
+
+(async () => {
+  const d = await j(`/api/items/${ID}`);
+  await buildForm(d);
+  renderPhotos(d.photos);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>藏品检索</h2>
+<section class="statsbar" id="statsbar"></section>
+<section class="filters">
+  <input id="q" placeholder="搜索：名称/机构/编号/备注…" style="flex:1;min-width:180px">
+  <select id="fCategory"><option value="">全部品类</option></select>
+  <select id="fSeries"><option value="">全部系列</option></select>
+  <select id="fStatus">
+    <option value="">全部状态</option>
+    <option value="draft">草稿</option><option value="in_stock">在库</option>
+    <option value="reviewing">送评中</option><option value="exhibited">展出中</option>
+    <option value="lent">借出</option><option value="consigned">寄售</option>
+    <option value="sold">已售</option><option value="lost">丢失</option>
+  </select>
+  <input id="yFrom" type="number" placeholder="年份从" style="width:90px">
+  <input id="yTo" type="number" placeholder="到" style="width:70px">
+  <button class="primary" id="go">查询</button>
+  <a class="btnlink" href="/api/export/xlsx" download>⬇️ 导出Excel</a>
+</section>
+<p class="hint"><a href="#" id="needPhotosLink">📷 待补拍清单</a> · <span id="total"></span></p>
+<section id="needPhotos" hidden></section>
+<table id="tbl">
+  <thead><tr>
+    <th>编号</th><th>名称</th><th>品类</th><th>系列</th><th>机构/券种</th>
+    <th>纪年</th><th>评级</th><th>状态</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const $ = s => document.querySelector(s);
+const STATUS = {draft:'草稿', in_stock:'在库', reviewing:'送评中', exhibited:'展出中',
+  lent:'借出', consigned:'寄售', sold:'已售', lost:'丢失'};
+
+async function j(url, opt){
+  const r = await fetch(url, opt);
+  if(r.status===401) return location='/login';
+  return r.json();
+}
+
+async function loadStats(){
+  const s = await j('/api/stats');
+  const np = await j('/api/needs-photos');
+  const bar = $('#statsbar');
+  bar.innerHTML =
+    `<span><b>${s.total}</b> 件</span>
+     <span>在库/展出等 <b>${s.confirmed}</b></span>
+     <span>草稿 <b>${s.draft}</b></span>
+     <span>照片 <b>${s.photos}</b> 张</span>
+     <span>估值合计 <b>${s.est_total ? s.est_total.toLocaleString() : 0}</b> 元</span>
+     <span>缺照片 <b>${np.count}</b> 件</span>`;
+  const sec = $('#needPhotos'); sec.hidden = true;
+  $('#needPhotosLink').textContent = `📷 待补拍清单（${np.count}）`;
+  $('#needPhotosLink').onclick = (e) => {
+    e.preventDefault();
+    sec.hidden = !sec.hidden;
+    if(!sec.hidden && !sec.dataset.loaded){
+      sec.innerHTML = np.items.map(it =>
+        `<div class="needsrow"><a href="/items/${it.id}">${it.item_code || ('草稿#'+it.id)}</a>
+         ${it.name||''} <span class="hint">缺${it.missing.map(m=>m==='front'?'正面':'背面').join('、')}</span></div>`
+      ).join('') || '<span class="hint">没有缺照片的藏品</span>';
+      sec.dataset.loaded = 1;
+    }
+  };
+}
+
+async function fill(sel, type){
+  const list = await j('/api/dict/' + type);
+  for(const d of list){
+    const op = document.createElement('option');
+    op.value = d.name; op.textContent = d.name;
+    sel.appendChild(op);
+  }
+}
+async function search(){
+  const p = new URLSearchParams();
+  if($('#q').value) p.set('q', $('#q').value);
+  if($('#fCategory').value) p.set('category', $('#fCategory').value);
+  if($('#fSeries').value) p.set('series', $('#fSeries').value);
+  if($('#fStatus').value) p.set('status', $('#fStatus').value);
+  if($('#yFrom').value) p.set('year_from', $('#yFrom').value);
+  if($('#yTo').value) p.set('year_to', $('#yTo').value);
+  const d = await j('/api/items?' + p);
+  $('#total').textContent = `共 ${d.total} 件`;
+  const tb = $('#tbl tbody');
+  tb.innerHTML = '';
+  for(const it of d.items){
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => location = '/items/' + it.id;
+    tr.innerHTML = `<td>${it.item_code||''}</td><td>${it.name||''}</td>
+      <td>${it.category||''}</td><td>${it.series||''}</td>
+      <td>${(it.bank||'') + (it.note_type?(' '+it.note_type):'')}</td>
+      <td>${it.year_text||''}</td>
+      <td>${(it.grade_co||'') + (it.grade_raw?(' '+it.grade_raw):'')}</td>
+      <td>${STATUS[it.status]||it.status}</td>`;
+    tb.appendChild(tr);
+  }
+}
+$('#go').onclick = search;
+$('#q').onkeydown = e => { if(e.key==='Enter') search(); };
+Promise.all([fill($('#fCategory'),'category'), fill($('#fSeries'),'series')])
+  .then(() => { search(); loadStats(); });
+</script>
+{% endblock %}
