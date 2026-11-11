@@ -6,14 +6,19 @@
 - viewer：只读浏览（价格不可见），写接口一律 403
 """
 import io
+import os
+import sqlite3 as _sqlite3
+import tempfile as _tempfile
+from datetime import datetime as _dt
 from typing import Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
+from fastapi.responses import FileResponse, StreamingResponse
+from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from . import models
@@ -258,6 +263,7 @@ class ItemPayload(BaseModel):
     fields: dict = {}
     confirm: bool = False
     status: Optional[str] = None
+    location_id: Optional[int] = None
 
 
 @router.post("/items")
@@ -278,7 +284,8 @@ async def update_item_ep(item_id: int, payload: ItemPayload,
         for k in FINANCIAL:
             fields.pop(k, None)   # 非管理员的改价直接丢弃
     return await run_in_threadpool(
-        confirm_item, item_id, fields, payload.confirm, user["username"], payload.status)
+        confirm_item, item_id, fields, payload.confirm,
+        user["username"], payload.status, payload.location_id)
 
 
 @router.get("/items")
@@ -287,6 +294,7 @@ def search_items(request: Request, q: Optional[str] = None,
                  note_type: Optional[str] = None, bank: Optional[str] = None,
                  printer: Optional[str] = None, doc_type: Optional[str] = None,
                  dynasty: Optional[str] = None, status: Optional[str] = None,
+                 location_id: Optional[int] = None,
                  year_from: Optional[int] = None, year_to: Optional[int] = None,
                  limit: int = 50, offset: int = 0,
                  user: dict = Depends(require_any)):
@@ -320,6 +328,12 @@ def search_items(request: Request, q: Optional[str] = None,
         if year_to is not None:
             where.append("year_sort <= ?")
             vals.append(year_to)
+        if location_id is not None:
+            if location_id == -1:      # “未入库位”
+                where.append("location_id IS NULL")
+            else:
+                where.append("location_id = ?")
+                vals.append(location_id)
 
         limit = max(1, min(limit, 200))
         total = conn.execute(
@@ -333,6 +347,22 @@ def search_items(request: Request, q: Optional[str] = None,
             "items": [_strip_financial(dict(r), role) for r in rows]}
 
 
+@router.get("/items/by-code/{code}")
+def item_by_code(code: str, _: dict = Depends(require_any)):
+    """盘点扫码用：内部编号或评级编号精确定位。"""
+    code = code.strip()
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT i.id, i.item_code, i.name, i.status, i.location_id,
+                      l.name AS location_name
+               FROM item i LEFT JOIN location l ON l.id = i.location_id
+               WHERE i.item_code = ? OR i.cert_no = ? LIMIT 1""",
+            (code, code)).fetchone()
+    if not row:
+        raise HTTPException(404, "未找到该编号")
+    return dict(row)
+
+
 @router.get("/items/{item_id}")
 def item_detail(item_id: int, user: dict = Depends(require_any)):
     with get_conn() as conn:
@@ -342,8 +372,12 @@ def item_detail(item_id: int, user: dict = Depends(require_any)):
         photos = conn.execute(
             "SELECT id, shot_type, origin, source_url, fetched_at, file_path, exif_time "
             "FROM photo WHERE item_id=? ORDER BY id", (item_id,)).fetchall()
+        events = conn.execute(
+            "SELECT kind, detail, operator, created_at FROM event "
+            "WHERE item_id=? ORDER BY id DESC LIMIT 30", (item_id,)).fetchall()
     out = dict(row)
     out["photos"] = [dict(p, url=f"/media/{p['file_path']}") for p in photos]
+    out["events"] = [dict(e) for e in events]
     return _strip_financial(out, user["role"])
 
 
@@ -459,3 +493,178 @@ def export_xlsx(_: dict = Depends(require_admin)):
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=items.xlsx; filename*=UTF-8''{fname}"})
+
+
+# ---------- 库位（展柜→层→盒） ----------
+
+class LocationPayload(BaseModel):
+    name: str
+    parent_id: Optional[int] = None
+    code: Optional[str] = None
+
+
+@router.get("/locations")
+def list_locations(_: dict = Depends(require_any)):
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT l.id, l.parent_id, l.name, l.code,
+                      (SELECT COUNT(*) FROM item i WHERE i.location_id = l.id) AS items
+               FROM location l
+               ORDER BY (l.parent_id IS NULL) DESC, l.parent_id, l.id""").fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.post("/locations")
+def add_location(p: LocationPayload, _: dict = Depends(require_admin)):
+    if not p.name.strip():
+        raise HTTPException(400, "名称不能为空")
+    if p.parent_id is not None:
+        with get_conn() as conn:
+            if not conn.execute("SELECT id FROM location WHERE id=?",
+                                (p.parent_id,)).fetchone():
+                raise HTTPException(400, "上级库位不存在")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO location(parent_id, name, code) VALUES(?,?,?)",
+            (p.parent_id, p.name.strip(), (p.code or "").strip() or None))
+        return {"ok": True, "id": cur.lastrowid}
+
+
+@router.put("/locations/{loc_id}")
+def rename_location(loc_id: int, p: LocationPayload, _: dict = Depends(require_admin)):
+    if not p.name.strip():
+        raise HTTPException(400, "名称不能为空")
+    if p.parent_id == loc_id:
+        raise HTTPException(400, "不能把自己设为上级")
+    with get_conn() as conn:
+        cur = conn.execute("UPDATE location SET name=?, parent_id=? WHERE id=?",
+                           (p.name.strip(), p.parent_id, loc_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "库位不存在")
+    return {"ok": True}
+
+
+@router.delete("/locations/{loc_id}")
+def delete_location(loc_id: int, _: dict = Depends(require_admin)):
+    with get_conn() as conn:
+        if conn.execute("SELECT id FROM location WHERE parent_id=?",
+                        (loc_id,)).fetchone():
+            raise HTTPException(400, "先删除该库位下的子库位")
+        n = conn.execute("SELECT COUNT(*) FROM item WHERE location_id=?",
+                         (loc_id,)).fetchone()[0]
+        if n:
+            raise HTTPException(400, f"该库位还有 {n} 件藏品，请先移走")
+        cur = conn.execute("DELETE FROM location WHERE id=?", (loc_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "库位不存在")
+    return {"ok": True}
+
+
+# ---------- Excel 导入（仅管理员，与导出同格式可回灌） ----------
+
+@router.post("/import/xlsx")
+async def import_xlsx(file: UploadFile = File(...), user: dict = Depends(require_admin)):
+    if file.size and file.size > UPLOAD_MAX:
+        raise HTTPException(413, "文件太大（限 16MB）")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "空文件")
+    cn2field = {cn: f for f, cn in EXPORT_COLS}
+    rev_status = {v: k for k, v in STATUS_CN.items()}
+
+    def parse_val(f, v):
+        if v is None or v == "":
+            return None
+        if f in ("purchase_price", "est_value"):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+        if f == "year_sort":
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+        return str(v)
+
+    imported = skipped = errors = 0
+    wb = load_workbook(io.BytesIO(data), read_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    header = next(it, None)
+    if not header:
+        raise HTTPException(400, "表格为空")
+    hmap = {str(h).strip(): i for i, h in enumerate(header) if h}
+
+    def cell(row, cn):
+        i = hmap.get(cn)
+        if i is None or i >= len(row):
+            return None
+        return row[i]
+
+    with get_conn() as conn:
+        for row in it:
+            if row is None or all(v in (None, "") for v in row):
+                continue
+            try:
+                cert_no = cell(row, "评级编号")
+                if cert_no:
+                    cert_no = str(cert_no).strip()
+                    if conn.execute("SELECT 1 FROM item WHERE cert_no=?",
+                                    (cert_no,)).fetchone():
+                        skipped += 1
+                        continue
+                code = cell(row, "内部编号")
+                code = str(code).strip() if code else None
+                if code and conn.execute("SELECT 1 FROM item WHERE item_code=?",
+                                         (code,)).fetchone():
+                    skipped += 1
+                    continue
+                fields = {f: parse_val(f, cell(row, cn))
+                          for f, cn in EXPORT_COLS if f not in ("status", "item_code")}
+                name = fields.get("name")
+                if not name:
+                    parts = [fields.get("bank"), fields.get("note_type"),
+                             fields.get("denomination"), fields.get("era")]
+                    name = " ".join(str(p) for p in parts if p) or "未命名藏品"
+                status_raw = cell(row, "状态")
+                status = rev_status.get(str(status_raw).strip(), "in_stock") \
+                    if status_raw else "in_stock"
+                cur = conn.execute(
+                    f"""INSERT INTO item(status, item_code, {', '.join(fields.keys())})
+                        VALUES(?, ?, {', '.join('?' * len(fields))})""",
+                    [status, code] + list(fields.values()))
+                item_id = cur.lastrowid
+                if not code:
+                    conn.execute("UPDATE item SET item_code=? WHERE id=?",
+                                 (f"M-{_dt.now().year}-{item_id:04d}", item_id))
+                models.fts_sync(conn, item_id, fields)
+                conn.execute(
+                    "INSERT INTO event(item_id, kind, detail, operator) VALUES(?,?,?,?)",
+                    (item_id, "入库", "Excel 导入", user["username"]))
+                imported += 1
+            except Exception:
+                errors += 1
+    return {"ok": True, "imported": imported, "skipped": skipped, "errors": errors}
+
+
+# ---------- 数据库备份（仅管理员，SQLite backup API 保证一致性） ----------
+
+@router.get("/backup/db")
+def backup_db(_: dict = Depends(require_admin)):
+    src = get_conn()
+    fd, tmp = _tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    dest = None
+    try:
+        dest = _sqlite3.connect(tmp)
+        src.backup(dest)
+    finally:
+        src.close()
+        if dest is not None:
+            dest.close()   # 不关的话 Windows 上文件被锁，删不掉
+    fname = quote(f"藏品数据库_{_dt.now():%Y%m%d_%H%M}.db")
+    return FileResponse(
+        tmp, filename="museum.db",
+        headers={"Content-Disposition": f"attachment; filename=museum.db; filename*=UTF-8''{fname}"},
+        background=BackgroundTask(os.unlink, tmp))

@@ -15,8 +15,14 @@
   </select>
   <input id="yFrom" type="number" placeholder="年份从" style="width:90px">
   <input id="yTo" type="number" placeholder="到" style="width:70px">
+  <select id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
   <button class="primary" id="go">查询</button>
-  {% if user and user.role == 'admin' %}<a class="btnlink" href="/api/export/xlsx" download>⬇️ 导出Excel</a>{% endif %}
+  {% if user and user.role == 'admin' %}
+  <a class="btnlink" href="/api/export/xlsx" download>⬇️ 导出Excel</a>
+  <a class="btnlink" href="#" id="importBtn">⬆️ 导入Excel</a>
+  <input type="file" id="importFile" accept=".xlsx" hidden>
+  <a class="btnlink" href="/api/backup/db" download>💾 备份数据库</a>
+  {% endif %}
 </section>
 <p class="hint"><a href="#" id="needPhotosLink">📷 待补拍清单</a> · <span id="total"></span></p>
 <section id="needPhotos" hidden></section>
@@ -77,6 +83,14 @@ async function fill(sel, type){
     sel.appendChild(op);
   }
 }
+async function fillLocs(sel){
+  const locs = await j('/api/locations');
+  for(const l of locs){
+    const op = document.createElement('option');
+    op.value = l.id; op.textContent = (l.parent_id ? '　└ ' : '') + l.name;
+    sel.appendChild(op);
+  }
+}
 async function search(p){
   if(p !== undefined) page = p;
   const params = new URLSearchParams();
@@ -86,6 +100,8 @@ async function search(p){
   if($('#fStatus').value) params.set('status', $('#fStatus').value);
   if($('#yFrom').value) params.set('year_from', $('#yFrom').value);
   if($('#yTo').value) params.set('year_to', $('#yTo').value);
+  if($('#fLocation').value)
+    params.set('location_id', $('#fLocation').value === 'none' ? -1 : $('#fLocation').value);
   params.set('limit', PAGE);
   params.set('offset', page * PAGE);
   const d = await j('/api/items?' + params);
@@ -115,7 +131,30 @@ async function search(p){
 }
 $('#go').onclick = () => search(0);
 $('#q').onkeydown = e => { if(e.key==='Enter') search(0); };
-Promise.all([fill($('#fCategory'),'category'), fill($('#fSeries'),'series')])
+$('#fLocation').onchange = () => search(0);
+
+// Excel 导入（管理员）：与导出同格式，可整表回灌
+{% if user and user.role == 'admin' %}
+$('#importBtn').onclick = e => { e.preventDefault(); $('#importFile').click(); };
+$('#importFile').onchange = async e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  if(!confirm('导入会跳过已存在的评级编号/内部编号，继续？')) { e.target.value=''; return; }
+  const fd = new FormData();
+  fd.append('file', f);
+  const r = await fetch('/api/import/xlsx', {method:'POST', body: fd});
+  if(r.status===401) return location='/login';
+  const d = await r.json();
+  if(d.ok){
+    alert(`导入完成：新增 ${d.imported} 件，跳过 ${d.skipped} 件（已存在），失败 ${d.errors} 件`);
+    search(0); loadStats();
+  } else alert('导入失败：' + (d.detail || ''));
+  e.target.value = '';
+};
+{% endif %}
+
+Promise.all([fill($('#fCategory'),'category'), fill($('#fSeries'),'series'),
+             fillLocs($('#fLocation'))])
   .then(() => { search(0); loadStats(); });
 </script>
 {% endblock %}

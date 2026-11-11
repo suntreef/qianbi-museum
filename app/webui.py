@@ -73,6 +73,26 @@ def item_print_page(item_id: int, request: Request):
     return templates.TemplateResponse(request, "item_print.html", _ctx(request, item_id=item_id))
 
 
+@router.get("/locations")
+def locations_page(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user["role"] != "admin":
+        return RedirectResponse("/items", 303)
+    return templates.TemplateResponse(request, "locations.html", _ctx(request))
+
+
+@router.get("/inventory")
+def inventory_page(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user["role"] not in ("admin", "staff"):
+        return RedirectResponse("/items", 303)
+    return templates.TemplateResponse(request, "inventory.html", _ctx(request))
+
+
 @router.get("/dict")
 def dict_page(request: Request):
     user = current_user(request)

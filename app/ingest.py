@@ -173,8 +173,9 @@ _NUMERIC_FIELDS = ("purchase_price", "est_value")
 
 
 def confirm_item(item_id: int, fields: dict, confirm: bool,
-                 operator: Optional[str] = None, status: Optional[str] = None) -> dict:
-    """确认入库 / 保存修改（编辑页用）。确认时生成一物一码；支持状态流转。"""
+                 operator: Optional[str] = None, status: Optional[str] = None,
+                 location_id: Optional[int] = None) -> dict:
+    """确认入库 / 保存修改（编辑页用）。确认时生成一物一码；支持状态流转与库位变更。"""
     fields = {k: v for k, v in (fields or {}).items() if k in FIELD_WHITELIST}
     for k in _NUMERIC_FIELDS:
         if k in fields:
@@ -184,7 +185,7 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
                 fields[k] = None
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, item_code, status, bank, note_type, denomination, era, name "
+            "SELECT id, item_code, status, location_id, bank, note_type, denomination, era, name "
             "FROM item WHERE id=?", (item_id,)).fetchone()
         if not row:
             return {"ok": False, "error": "藏品不存在"}
@@ -221,6 +222,20 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
             sets.append("status=?")
             vals.append(new_status)
 
+        # 库位变更
+        if location_id is not None:
+            loc_id = None if location_id in (0, "") else location_id
+            if loc_id is not None and not conn.execute(
+                    "SELECT id FROM location WHERE id=?", (loc_id,)).fetchone():
+                loc_id = None
+            if loc_id != row["location_id"]:
+                sets.append("location_id=?")
+                vals.append(loc_id)
+                conn.execute(
+                    "INSERT INTO event(item_id, kind, detail, operator) VALUES(?,?,?,?)",
+                    (item_id, "位置变更",
+                     f"{row['location_id'] or '无'} → {loc_id or '无'}", operator))
+
         item_code = row["item_code"]
         if confirm and not item_code:
             item_code = f"{ITEM_CODE_PREFIX}-{datetime.now().year}-{item_id:04d}"
@@ -232,7 +247,7 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
             conn.execute(f"UPDATE item SET {', '.join(sets)} WHERE id=?",
                          [*vals, item_id])
             row2 = conn.execute(
-                "SELECT name, notes, region, variety, era, denomination "
+                "SELECT name, notes, region, variety, era, denomination, cert_no, item_code "
                 "FROM item WHERE id=?", (item_id,)).fetchone()
             models.fts_sync(conn, item_id, dict(row2))
         if new_status and new_status != row["status"]:

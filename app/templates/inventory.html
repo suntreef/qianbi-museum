@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>盘点</h2>
+<p class="hint">选一个库位开始盘点：逐件输入或扫码枪扫「内部编号 / 评级编号」，
+系统实时核对在场情况。结束后给出差异报告（账有实无 / 位置不符），可一键归位。</p>
+<section class="filters">
+  <select id="loc" style="flex:1"><option value="">— 选择库位（可选：全部在库藏品）—</option></select>
+  <button class="primary" id="startBtn">开始盘点</button>
+</section>
+
+<section id="session" hidden>
+  <div class="statsbar" id="tally"></div>
+  <div class="filters">
+    <input id="scan" placeholder="输入/扫描 编号后回车" style="flex:1" autocomplete="off">
+  </div>
+  <div class="filters">
+    <button id="finishBtn">✅ 结束盘点，出差异报告</button>
+    <button id="resetBtn">重新开始</button>
+  </div>
+  <div id="report"></div>
+  <h3>在场核对</h3>
+  <table id="tbl">
+    <thead><tr><th>编号</th><th>名称</th><th>评级</th><th>核对结果</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let expected = [], locId = null, locName = '';
+
+async function j(url, opt){
+  const r = await fetch(url, opt);
+  if(r.status===401) return location='/login';
+  if(r.status===403){ alert('权限不够'); return null; }
+  if(r.status===404) return null;
+  return r.json();
+}
+function toast(msg, bad){
+  const d = document.createElement('div');
+  d.className = 'toast' + (bad ? ' bad' : ''); d.textContent = msg;
+  document.body.appendChild(d);
+  setTimeout(()=>d.remove(), 3500);
+}
+
+async function loadLocs(){
+  const locs = await j('/api/locations');
+  $('#loc').innerHTML = '<option value="">— 选择库位（可选：全部在库藏品）—</option>' +
+    locs.map(l => `<option value="${l.id}">${l.parent_id ? '　└ ' : ''}${esc(l.name)}（${l.items}件）</option>`).join('');
+}
+
+async function start(){
+  locId = $('#loc').value ? parseInt($('#loc').value) : null;
+  locName = $('#loc').selectedOptions[0]?.textContent.trim() || '全部在库';
+  const p = new URLSearchParams({limit: 200, status: 'in_stock'});
+  if(locId) p.set('location_id', locId);
+  const d = await j('/api/items?' + p);
+  expected = d.items;
+  if(!expected.length) return alert('该范围下没有在库藏品');
+  $('#session').hidden = false;
+  $('#report').innerHTML = '';
+  render();
+  $('#scan').focus();
+}
+
+function render(){
+  const done = expected.filter(x => x.state).length;
+  $('#tally').innerHTML =
+    `<span>库位：<b>${esc(locName)}</b></span>
+     <span>应到 <b>${expected.length}</b></span>
+     <span>已核对 <b>${done}</b></span>
+     <span>在场 <b class="okc">${expected.filter(x=>x.state==='在场').length}</b></span>
+     <span>位置不符 <b class="badc">${expected.filter(x=>x.state==='位置不符').length}</b></span>`;
+  const tb = $('#tbl tbody');
+  tb.innerHTML = expected.map(x =>
+    `<tr><td>${esc(x.item_code)}</td><td>${esc(x.name)}</td><td>${esc(x.grade_raw||'')}</td>
+     <td>${x.state || '<span class="hint">待核对</span>'}</td></tr>`).join('');
+}
+
+async function doScan(code){
+  code = code.trim();
+  if(!code) return;
+  $('#scan').value = '';
+  const it = await j('/api/items/by-code/' + encodeURIComponent(code));
+  if(!it) return toast(`未找到「${code}」`, true);
+  const row = expected.find(x => x.id === it.id);
+  if(row){
+    row.state = (locId && it.location_id === locId || !locId) ? '在场' : '位置不符';
+    toast(`✓ ${it.item_code || it.name}`);
+  } else {
+    toast(`⚠️ 「${it.item_code || code}」不属于本盘点范围（状态非在库或不在该库位）`, true);
+  }
+  render();
+}
+$('#scan').onkeydown = e => { if(e.key === 'Enter') doScan(e.target.value); };
+
+$('#finishBtn').onclick = () => {
+  const missing = expected.filter(x => !x.state);
+  const misplaced = expected.filter(x => x.state === '位置不符');
+  let html = `<div class="card"><h3>差异报告 · ${esc(locName)}</h3>
+    <p>应到 ${expected.length} 件 · 在场 ${expected.length - missing.length - misplaced.length} 件 ·
+       位置不符 ${misplaced.length} 件 · 账有实无 ${missing.length} 件</p>`;
+  if(misplaced.length){
+    html += `<p><b>位置不符（实际出现在本库位，但账在其他位置）：</b></p>` +
+      misplaced.map(x => `<div class="needsrow"><a href="/items/${x.id}">${esc(x.item_code)}</a> ${esc(x.name)}</div>`).join('');
+    if(locId) html += `<button class="primary" onclick="rehome()">一键归位（把上面这些登记到本库位）</button>`;
+  }
+  if(missing.length){
+    html += `<p style="margin-top:10px"><b>账有实无（请现场再找一遍）：</b></p>` +
+      missing.map(x => `<div class="needsrow"><a href="/items/${x.id}">${esc(x.item_code)}</a> ${esc(x.name)}</div>`).join('');
+  }
+  html += '</div>';
+  $('#report').innerHTML = html;
+  document.getElementById('report').scrollIntoView();
+};
+window.rehome = async () => {
+  const misplaced = expected.filter(x => x.state === '位置不符');
+  for(const x of misplaced){
+    await j(`/api/items/${x.id}`, {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({fields:{}, location_id: locId})});
+  }
+  toast(`已归位 ${misplaced.length} 件`);
+  start();
+};
+$('#resetBtn').onclick = () => { expected.forEach(x => delete x.state); render(); };
+$('#startBtn').onclick = start;
+loadLocs();
+</script>
+{% endblock %}

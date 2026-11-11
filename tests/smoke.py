@@ -247,4 +247,68 @@ with TestClient(app) as c:
     check("采集页", c.get("/capture").status_code == 200)
     check("登录页", c.get("/login").status_code == 200)
 
+    # ---------- 库位 / 盘点 / 导入 / 备份 ----------
+    r = c.post("/api/locations", json={"name": "一号展柜"}).json()
+    check("库位-建展柜", r["ok"] and r["id"] > 0)
+    root_id = r["id"]
+    child_id = c.post("/api/locations",
+                      json={"name": "第1层", "parent_id": root_id}).json()["id"]
+    check("库位-建子层", child_id > 0)
+    check("库位-改名", c.put(f"/api/locations/{root_id}", json={
+        "name": "二号展柜", "parent_id": None}).json()["ok"])
+    check("库位-列表", len(c.get("/api/locations").json()) == 2)
+
+    c.post(f"/api/items/{iid}", json={"location_id": child_id})
+    d = c.get(f"/api/items/{iid}").json()
+    check("藏品归位", d["location_id"] == child_id)
+    r = c.get("/api/items", params={"location_id": child_id}).json()
+    check("按库位筛选", r["total"] == 1)
+    r = c.get("/api/items", params={"location_id": -1}).json()
+    check("未入库位筛选", all(it["location_id"] is None for it in r["items"]))
+    check("库位-有藏品禁删", c.delete(f"/api/locations/{child_id}").status_code == 400)
+    check("库位-有子级禁删", c.delete(f"/api/locations/{root_id}").status_code == 400)
+
+    code = d["item_code"]
+    r = c.get(f"/api/items/by-code/{code}").json()
+    check("扫码-内部编号", r["id"] == iid and r["location_name"], f"code={code}")
+    r = c.get("/api/items/by-code/777666555").json()
+    check("扫码-评级编号", r is not None and r["id"] == res["item_id"])
+    check("扫码-不存在", c.get("/api/items/by-code/NOPE123").status_code == 404)
+
+    d = c.get(f"/api/items/{iid}").json()
+    kinds = [e["kind"] for e in d["events"]]
+    check("操作日志", "入库" in kinds and "位置变更" in kinds, str(kinds[:4]))
+
+    from openpyxl import Workbook as _WB
+    wb2 = _WB(); ws2 = wb2.active
+    ws2.append(["内部编号", "名称", "品类", "系列", "发行机构", "券种/类型", "印刷厂",
+                "文书类型", "朝代", "年号/品种", "面值", "版别", "材质", "纪年", "公历年",
+                "地域", "评级公司", "评级编号", "分数", "分数制", "冠字号", "状态", "来源",
+                "采购价", "采购日期", "估值", "估值日期", "备注", "录入时间"])
+    ws2.append([None, "导入测试 光绪通宝", "铜钱", None, None, None, None, None, "清",
+                "光绪通宝", "当十", None, "铜", "光绪三十一年", 1905, None, "公博",
+                "IMP2026001", "美品78", "85制", None, "在库", "购入", 88, None, 120,
+                None, "导入测试", None])
+    b2 = io.BytesIO()
+    wb2.save(b2)
+    xlsx_bytes = b2.getvalue()
+    xlsx_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    r = c.post("/api/import/xlsx", files={"file": ("t.xlsx", xlsx_bytes, xlsx_type)}).json()
+    check("Excel导入-新增", r["imported"] == 1 and r["skipped"] == 0, str(r))
+    r = c.get("/api/items", params={"q": "IMP2026001"}).json()
+    check("Excel导入-按编号检索", r["total"] == 1 and r["items"][0]["year_sort"] == 1905,
+          f"total={r['total']}")
+    r = c.post("/api/import/xlsx", files={"file": ("t.xlsx", xlsx_bytes, xlsx_type)}).json()
+    check("Excel导入-重复跳过", r["skipped"] == 1 and r["imported"] == 0, str(r))
+
+    r = c.get("/api/backup/db")
+    check("数据库备份", r.status_code == 200 and len(r.content) > 5000,
+          f"{len(r.content)}字节")
+
+    check("库位页", c.get("/locations").status_code == 200)
+    check("盘点页", c.get("/inventory").status_code == 200)
+    check("录入员库位页被拒", staff.get("/locations", follow_redirects=False).status_code == 303)
+    check("录入员盘点页", staff.get("/inventory").status_code == 200)
+    check("只读用户盘点被拒", viewer.get("/inventory", follow_redirects=False).status_code == 303)
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

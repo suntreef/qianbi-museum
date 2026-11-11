@@ -19,6 +19,9 @@
       <select id="source"><option value=""></option><option>购入</option><option>捐赠</option>
         <option>代管</option><option>交换</option><option>其他</option></select>
     </label>
+    <label>库位
+      <select id="location_id"><option value="">（未入库位）</option></select>
+    </label>
     {% if user and user.role == 'admin' %}
     <label>采购价<input id="purchase_price" type="number" step="0.01"></label>
     <label>采购日期<input id="purchase_date" type="date"></label>
@@ -48,6 +51,12 @@
     <input type="file" accept="image/*" capture="environment" hidden id="photoInput">
   </label>
 </div>
+
+<h3>操作日志</h3>
+<table id="events">
+  <thead><tr><th>时间</th><th>事件</th><th>详情</th><th>经手人</th></tr></thead>
+  <tbody></tbody>
+</table>
 
 <script>
 const ID = {{ item_id }};
@@ -102,9 +111,26 @@ async function buildForm(d){
   for(const [f] of TEXTS) if(d[f] !== null && d[f] !== undefined) $('#f_'+f).value = d[f];
   if(d.status) $('#status').value = d.status;
   if(d.source) $('#source').value = d.source;
+  // 库位下拉
+  const locs = await j('/api/locations');
+  const locSel = $('#location_id');
+  for(const l of locs){
+    const op = document.createElement('option');
+    op.value = l.id; op.textContent = (l.parent_id ? '　└ ' : '') + l.name;
+    locSel.appendChild(op);
+  }
+  if(d.location_id) locSel.value = d.location_id;
   for(const f of ['purchase_price','purchase_date','est_value','est_date']){
     const el = document.getElementById(f);
     if(el && d[f] !== null && d[f] !== undefined) el.value = d[f];
+  }
+  // 操作日志
+  const tb = document.querySelector('#events tbody');
+  for(const e of (d.events || [])){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${e.created_at||''}</td><td>${e.kind||''}</td>
+      <td>${(e.detail||'').replace(/</g,'&lt;')}</td><td>${e.operator||''}</td>`;
+    tb.appendChild(tr);
   }
 }
 
@@ -137,6 +163,7 @@ $('#save').onclick = async () => {
   const val = id => { const el = document.getElementById(id); return el ? el.value : null; };
   const payload = {fields, confirm:false, status:val('status'),
     source:val('source') || null,
+    location_id: val('location_id') ? parseInt(val('location_id')) : 0,
     purchase_price:val('purchase_price'),
     purchase_date:val('purchase_date') || null,
     est_value:val('est_value'),

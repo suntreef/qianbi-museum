@@ -137,8 +137,9 @@ CREATE INDEX IF NOT EXISTS idx_event_item ON event(item_id);
 # 全文检索表（trigram 分词，中文子串友好）。建不出来（老 SQLite）自动降级 LIKE。
 FTS_DDL = ("CREATE VIRTUAL TABLE IF NOT EXISTS fts_item USING "
            "fts5(item_id UNINDEXED, name, notes, region, variety, era, denomination, "
-           "tokenize='trigram')")
-FTS_FIELDS = ("name", "notes", "region", "variety", "era", "denomination")
+           "cert_no, item_code, tokenize='trigram')")
+FTS_FIELDS = ("name", "notes", "region", "variety", "era", "denomination",
+              "cert_no", "item_code")
 FTS_OK = False
 
 
@@ -169,7 +170,8 @@ def fts_rebuild(conn: sqlite3.Connection) -> None:
     if not FTS_OK:
         return
     rows = conn.execute(
-        "SELECT id, name, notes, region, variety, era, denomination FROM item").fetchall()
+        "SELECT id, name, notes, region, variety, era, denomination, cert_no, item_code "
+        "FROM item").fetchall()
     conn.execute("DELETE FROM fts_item")
     for r in rows:
         fts_sync(conn, r["id"], dict(r))
@@ -182,11 +184,11 @@ def fts_sync(conn: sqlite3.Connection, item_id: int, values: dict) -> None:
     conn.execute("DELETE FROM fts_item WHERE rowid=?", (item_id,))
     if any(values.get(f) for f in FTS_FIELDS):
         conn.execute(
-            "INSERT INTO fts_item(rowid, item_id, name, notes, region, variety, era, denomination) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO fts_item(rowid, item_id, name, notes, region, variety, era, "
+            "denomination, cert_no, item_code) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (item_id, item_id, values.get("name"), values.get("notes"),
              values.get("region"), values.get("variety"), values.get("era"),
-             values.get("denomination")))
+             values.get("denomination"), values.get("cert_no"), values.get("item_code")))
 
 
 def fts_delete(conn: sqlite3.Connection, item_id: int) -> None:
