@@ -38,6 +38,26 @@
   </div>
 </div>
 
+<div class="card" id="introCard">
+  <div class="card-head"><b>🎧 讲解介绍（游客扫码可听，约30秒）</b>
+    <span class="hint" id="introSrc"></span></div>
+  <textarea id="introText" rows="4" style="width:100%;border:none;border-radius:12px;
+    box-shadow:var(--shadow-1);padding:12px;font-family:inherit;font-size:15px;
+    background:#fffdf8;color:#2e2b24"></textarea>
+  <div class="btns">
+    <button id="genIntro">✨ 生成介绍</button>
+    <select id="voice" style="padding:10px;border:none;border-radius:12px;
+      box-shadow:var(--shadow-1);font-family:inherit">
+      <option value="xiaoxiao">晓晓（女声）</option>
+      <option value="yunjian">云健（男声）</option>
+      <option value="yunxi">云希（男声）</option>
+    </select>
+    <button id="genTts">🔊 合成30秒语音</button>
+  </div>
+  <audio id="introAudio" controls style="width:100%;margin-top:10px"></audio>
+  <p class="hint">「生成介绍」：配置了大模型插口时用 AI 撰写，否则按档案字段模板生成，可手改后再合成语音。语音存入档案后，游客扫展签二维码即可收听。</p>
+</div>
+
 <h3>照片</h3>
 <div class="photos" id="photoRow"></div>
 <div class="fieldrow">
@@ -52,6 +72,12 @@
     <input type="file" accept="image/*" capture="environment" hidden id="photoInput">
   </label>
 </div>
+
+<h3>估值历史</h3>
+<table id="vhist">
+  <thead><tr><th>时间</th><th>旧值</th><th>新值</th><th>来源</th><th>经手人</th></tr></thead>
+  <tbody></tbody>
+</table>
 
 <h3>操作日志</h3>
 <table id="events">
@@ -78,12 +104,14 @@ const SELECTS = [
   ['category','品类','category'], ['series','系列','series'], ['dynasty','朝代','dynasty'],
   ['bank','发行机构','bank'], ['note_type','券种/类型','note_type'], ['printer','印刷厂','printer'],
   ['doc_type','文书类型','doc_type'], ['grade_co','评级公司','grade_co'],
+  ['level','藏品等级','item_level'], ['condition_st','保存状况','condition_st'],
 ];
 const TEXTS = [
   ['item_code','内部编号（馆内编号）'], ['name','名称'], ['era','年号/品种'],
   ['denomination','面值'], ['variety','版别'],
   ['year_text','纪年'], ['region','地域'], ['grade_raw','分数'], ['grade_scale','分数制'],
-  ['serial_no','冠字号'], ['cert_no','评级编号（藏品自身代码，作属性展示）'],
+  ['serial_no','冠字号'], ['catalog_ref','目录号（Pick#/泉谱）'],
+  ['cert_no','评级编号（藏品自身代码，作属性展示）'],
   ['notes','备注'],
   ['send_express','送评寄出单号'], ['send_fee','送评费用'],
 ];
@@ -138,6 +166,20 @@ async function buildForm(d){
     const el = document.getElementById(f);
     if(el && d[f] !== null && d[f] !== undefined) el.value = d[f];
   }
+  // 讲解介绍
+  if(d.intro_text) $('#introText').value = d.intro_text;
+  if(d.intro_audio_url) $('#introAudio').src = d.intro_audio_url;
+  if(d.intro_text) $('#introSrc').textContent = '已保存';
+  // 估值历史
+  const vh = document.querySelector('#vhist tbody');
+  for(const v of (d.value_history || [])){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="num">${v.created_at||''}</td>
+      <td class="num">${v.old_value!=null ? Number(v.old_value).toLocaleString() : '—'}</td>
+      <td class="num"><b>${v.new_value!=null ? Number(v.new_value).toLocaleString() : ''}</b></td>
+      <td>${esc(v.source)||''}</td><td>${esc(v.operator)||''}</td>`;
+    vh.appendChild(tr);
+  }
   // 操作日志
   const tb = document.querySelector('#events tbody');
   for(const e of (d.events || [])){
@@ -178,10 +220,34 @@ function openLightbox(src){
   lb.hidden = false;
 }
 
+$('#genIntro').onclick = async () => {
+  $('#introSrc').textContent = '生成中…';
+  const d = await j(`/api/items/${ID}/intro/generate`, {method:'POST'});
+  if(d && d.ok){
+    $('#introText').value = d.text;
+    $('#introSrc').textContent = d.source + '（可手改后保存）';
+    feedback(true);
+  } else if(d) { feedback(false); alert('生成失败：' + (d.detail || '')); }
+};
+$('#genTts').onclick = async () => {
+  if(!$('#introText').value.trim()) return alert('请先填写或生成介绍文案');
+  $('#introSrc').textContent = '语音合成中…';
+  const d = await j(`/api/items/${ID}/intro/tts`, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({voice: $('#voice').value})});
+  if(d && d.ok){
+    $('#introAudio').src = d.url;
+    $('#introAudio').play().catch(()=>{});
+    $('#introSrc').textContent = '语音已生成并挂入档案';
+    feedback(true);
+  } else if(d) { feedback(false); alert('合成失败：' + (d.detail || '')); }
+};
+// 保存时把介绍文案一并提交
 $('#save').onclick = async () => {
   const fields = {};
   for(const [f] of SELECTS){ const v = $('#f_'+f).value; if(v) fields[f]=v; }
   for(const [f] of TEXTS){ fields[f] = $('#f_'+f).value || null; }
+  fields.intro_text = $('#introText').value || null;
   const val = id => { const el = document.getElementById(id); return el ? el.value : null; };
   const payload = {fields, confirm:false, status:val('status'),
     source:val('source') || null,

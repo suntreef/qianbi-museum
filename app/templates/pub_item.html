@@ -16,6 +16,9 @@
   td { padding: 9px 12px; border-bottom: 1px solid #eee; font-size: 15px; }
   td:first-child { color: #8a7a52; width: 90px; }
   footer { text-align: center; color: #999; font-size: 12px; padding: 20px; }
+  .hint2 { color: #8a7a52; font-size: 13px; margin: 4px 0; }
+  .chip { display: inline-block; padding: 3px 12px; border-radius: 999px;
+    background: #f4ead0; color: #8a6c1e; font-size: 13px; font-weight: 600; }
   #lightbox { position: fixed; inset: 0; background: rgba(22,20,15,.93);
     display: flex; align-items: center; justify-content: center;
     cursor: zoom-out; z-index: 99; }
@@ -34,15 +37,19 @@
 const FIELDS = [["category","品类"],["series","系列"],["dynasty","朝代"],["bank","发行机构"],
   ["note_type","券种/类型"],["printer","印刷厂"],["doc_type","文书类型"],["era","年号/品种"],
   ["denomination","面值"],["variety","版别"],["material","材质"],["year_text","纪年"],
-  ["region","地域"],["grade_co","评级公司"],["grade_raw","品相"]];
+  ["region","地域"],["grade_co","评级公司"],["grade_raw","品相"],
+  ["level","等级"],["catalog_ref","目录号"],["cert_no","评级编号"],["intro_text","介绍"]];
 fetch('/api/pub/item/' + encodeURIComponent('{{ code }}')).then(r => {
   if(!r.ok) throw 0;
   return r.json();
 }).then(d => {
   const esc = s => String(s ?? '').replace(/[&<>"']/g,
     c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let html = `<h1>${esc(d.name)}</h1>
-    <div class="photos">${(d.photos||[]).map(u => `<img src="${u}" loading="lazy">`).join('')}</div>
+  let html = `<h1>${esc(d.name)}</h1>`;
+  if(d.intro_audio) html += `<audio controls src="${esc(d.intro_audio)}" style="width:100%;margin:8px 0"></audio>
+    <p class="hint2">🎧 点击收听讲解</p>`;
+  if(d.level) html += `<p><span class="chip c-level">${esc(d.level)}</span></p>`;
+  html += `<div class="photos">${(d.photos||[]).map(u => `<img src="${u}" loading="lazy">`).join('')}</div>
     <table>`;
   for(const [f, label] of FIELDS){
     if(!d[f]) continue;

@@ -496,4 +496,32 @@ with TestClient(app) as c:
     check("注销状态可用", d.get("status") == "retired", str(d.get("status")))
     c.post(f"/api/items/{n1}", json={"status": "in_stock"})
 
+    # ---------- 讲解介绍 / 分级 / 目录号 / 估值历史 ----------
+    check("等级字典", any(e["name"] == "镇馆之宝"
+          for e in c.get("/api/dict/item_level").json()))
+    c.post(f"/api/items/{iid}", json={"fields": {
+        "level": "镇馆之宝", "catalog_ref": "Pick# 419a", "condition_st": "完好"}})
+    d = c.get(f"/api/items/{iid}").json()
+    check("分级与目录号", d.get("level") == "镇馆之宝"
+          and d.get("catalog_ref") == "Pick# 419a"
+          and d.get("condition_st") == "完好",
+          str((d.get("level"), d.get("catalog_ref"), d.get("condition_st"))))
+    r = c.post(f"/api/items/{iid}/intro/generate").json()
+    check("介绍-模板生成", r["ok"] and len(r["text"]) > 5
+          and r["source"] == "模板生成", f"{r['source']} {len(r['text'])}字")
+    c.post(f"/api/items/{iid}", json={"fields": {"est_value": 5200}})
+    d = c.get(f"/api/items/{iid}").json()
+    vh = d.get("value_history", [])
+    check("估值历史留痕", len(vh) >= 1 and vh[0]["new_value"] == 5200, str(vh[:1]))
+    pub = c.get(f"/api/pub/item/{d['item_code']}").json()
+    check("导览含介绍与等级", pub.get("intro_text")
+          and pub.get("level") == "镇馆之宝", str(pub.get("level")))
+    r = c.post(f"/api/items/{iid}/estimate")
+    check("AI估值-无插口提示", r.status_code == 400, str(r.status_code))
+    r = c.post(f"/api/items/{iid}/intro/tts", json={"voice": "xiaoxiao"})
+    if r.status_code == 200 and r.json().get("url"):
+        check("TTS语音生成", True, r.json()["url"])
+    else:
+        print("[SKIP] TTS 生成（外网/微软服务不可达时降级为仅文字）:", r.status_code)
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

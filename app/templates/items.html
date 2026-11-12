@@ -23,6 +23,7 @@
     <option value="value">估值 ↓</option>
     <option value="code">编号 ↑</option>
   </select>
+  <select id="fLevel"><option value="">全部等级</option></select>
   <select id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
   <button class="primary" id="go">查询</button>
   {% if user and user.role == 'admin' %}
@@ -122,6 +123,7 @@ function renderCards(items){
       ? `<img class="thumb" src="${it.thumb}" loading="lazy" alt="">`
       : `<div class="thumb-empty">🪙</div>`;
     const chips = [chipHTML(it.status)];
+    if(it.level) chips.push(`<span class="chip c-level">${esc(it.level)}</span>`);
     if(it.grade_co)
       chips.push(`<span class="chip c-grade">${esc(it.grade_co + (it.grade_raw ? ' ' + it.grade_raw : ''))}</span>`);
     const price = ADMIN && (it.est_value || it.purchase_price)
@@ -180,6 +182,7 @@ async function search(p){
   if($('#yTo').value) params.set('year_to', $('#yTo').value);
   if($('#fLocation').value)
     params.set('location_id', $('#fLocation').value === 'none' ? -1 : $('#fLocation').value);
+  if($('#fLevel').value) params.set('level', $('#fLevel').value);
   if($('#fsort').value) params.set('sort', $('#fsort').value);
   params.set('limit', PAGE);
   params.set('offset', page * PAGE);
@@ -227,7 +230,7 @@ $('#importFile').onchange = async e => {
 {% endif %}
 
 Promise.all([fill($('#fCategory'),'category'), fill($('#fSeries'),'series'),
-             fillLocs($('#fLocation'))])
+             fill($('#fLevel'),'item_level'), fillLocs($('#fLocation'))])
   .then(() => { search(0); loadStats(); });
 </script>
 {% endblock %}

@@ -99,6 +99,7 @@ body:has(.fab-bar) main { padding-bottom: 132px; }
 .chip.c-in_stock   { background: #e2ede6; color: #356253; }  /* 黛绿 · 在库 */
 .chip.c-draft      { background: #ecebe5; color: #6f6a5c; }
 .chip.c-reviewing  { background: #f4ead0; color: #8a6c1e; }  /* 秋香黄 · 送评 */
+.chip.c-level      { background: #f4ead0; color: #8a6c1e; }  /* 秋香黄 · 等级 */
 .chip.c-exhibited  { background: #e1eaf1; color: #3a566d; }
 .chip.c-lent       { background: #ede6ef; color: #6d5a78; }
 .chip.c-consigned  { background: #f3e9dc; color: #8a5f33; }

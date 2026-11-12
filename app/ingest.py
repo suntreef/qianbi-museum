@@ -26,6 +26,7 @@ FIELD_WHITELIST = [
     "grade_raw", "grade_scale", "serial_no",
     "source", "purchase_price", "purchase_date", "est_value", "est_date", "notes",
     "send_express", "send_fee",
+    "level", "catalog_ref", "condition_st", "intro_text",
 ]
 
 
@@ -222,7 +223,7 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
     with get_conn() as conn:
         row = conn.execute(
             "SELECT id, item_code, status, location_id, category, series, dynasty, "
-            "bank, note_type, denomination, era, name "
+            "bank, note_type, denomination, era, name, est_value "
             "FROM item WHERE id=?", (item_id,)).fetchone()
         if not row:
             return {"ok": False, "error": "藏品不存在"}
@@ -282,6 +283,15 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
                     (item_id, "位置变更",
                      f"{row['location_id'] or '无'} → {loc_id or '无'}", operator))
 
+        # 估值变更留痕（估值历史）
+        if "est_value" in fields and fields["est_value"] is not None:
+            new_v, old_v = fields["est_value"], row["est_value"]
+            if old_v is None or abs(new_v - old_v) > 1e-9:
+                conn.execute(
+                    "INSERT INTO value_history(item_id, old_value, new_value, "
+                    "source, operator) VALUES(?,?,?,?,?)",
+                    (item_id, old_v, new_v, "手动", operator))
+
         # 状态改为在库时补发一物一码（馆内编号体系：品类码-时代码-入藏年-流水）
         item_code = fields.get("item_code") or row["item_code"]
         if (confirm or new_status == "in_stock") and not item_code:
@@ -304,7 +314,8 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
             conn.execute(f"UPDATE item SET {', '.join(sets)} WHERE id=?",
                          [*vals, item_id])
             row2 = conn.execute(
-                "SELECT name, notes, region, variety, era, denomination, cert_no, item_code "
+                "SELECT name, notes, region, variety, era, denomination, cert_no, "
+                "item_code, intro_text, catalog_ref "
                 "FROM item WHERE id=?", (item_id,)).fetchone()
             models.fts_sync(conn, item_id, dict(row2))
         if new_status and new_status != row["status"]:

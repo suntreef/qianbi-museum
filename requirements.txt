@@ -9,6 +9,7 @@ zxing-cpp==3.1.1
 openai==3.49.0
 openpyxl==3.1.5
 qrcode==8.2
+edge-tts==7.3.1
 # 本地免费 OCR（CPU 友好，中文标签识别够用）：不锁版本，
 # 有 try/except 降级保护，即使未来版本变化也不影响主流程
 rapidocr-onnxruntime

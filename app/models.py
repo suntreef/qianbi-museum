@@ -65,6 +65,13 @@ CREATE TABLE IF NOT EXISTS item (
     purchase_date   TEXT,
     est_value       REAL,
     est_date        TEXT,
+    level           TEXT,                       -- 藏品等级（镇馆之宝/一级/二级/三级/一般）
+    catalog_ref     TEXT,                       -- 目录号：Pick#/KM#/泉谱编号（收藏行业标准）
+    condition_st    TEXT,                       -- 保存状况：完好/轻微氧化/需处理/已修复
+    intro_text      TEXT,                       -- 讲解介绍文案（AI生成可编辑，导览页展示）
+    intro_audio     TEXT,                       -- 30秒讲解语音（相对路径，TTS生成）
+    send_express    TEXT,
+    send_fee        REAL,
     notes           TEXT,
     created_by      TEXT,
     created_at      TEXT DEFAULT (datetime('now','localtime')),
@@ -139,6 +146,18 @@ CREATE TABLE IF NOT EXISTS setting (
     value TEXT
 );
 
+-- 估值历史（每次估值变更留痕：手动/AI参考）
+CREATE TABLE IF NOT EXISTS value_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id    INTEGER NOT NULL REFERENCES item(id),
+    old_value  REAL,
+    new_value  REAL,
+    source     TEXT,                            -- 手动 / AI参考
+    operator   TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_vhist_item ON value_history(item_id);
+
 -- 批量识别任务：照片排队，后台线程限速逐张跑（人可以先走）
 CREATE TABLE IF NOT EXISTS batch_job (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,9 +186,9 @@ CREATE INDEX IF NOT EXISTS idx_batch_item_job ON batch_item(job_id, status);
 # 全文检索表（trigram 分词，中文子串友好）。建不出来（老 SQLite）自动降级 LIKE。
 FTS_DDL = ("CREATE VIRTUAL TABLE IF NOT EXISTS fts_item USING "
            "fts5(item_id UNINDEXED, name, notes, region, variety, era, denomination, "
-           "cert_no, item_code, tokenize='trigram')")
+           "cert_no, item_code, intro_text, catalog_ref, tokenize='trigram')")
 FTS_FIELDS = ("name", "notes", "region", "variety", "era", "denomination",
-              "cert_no", "item_code")
+              "cert_no", "item_code", "intro_text", "catalog_ref")
 FTS_OK = False
 
 
@@ -195,10 +214,16 @@ def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         # 平滑升级：老库补新列
-        _ensure_column(conn, "item", "send_express", "TEXT")   # 送评寄出单号
-        _ensure_column(conn, "item", "send_fee", "REAL")       # 送评费用
+        for col, ddl in (("send_express", "TEXT"), ("send_fee", "REAL"),
+                         ("level", "TEXT"), ("catalog_ref", "TEXT"),
+                         ("condition_st", "TEXT"), ("intro_text", "TEXT"),
+                         ("intro_audio", "TEXT")):
+            _ensure_column(conn, "item", col, ddl)
         _ensure_column(conn, "dict_entry", "code", "TEXT")     # 品类/时代编码（编号体系用）
         try:
+            # FTS 结构随版本演进（字段可能增减），启动时删除重建；
+            # 索引数据本来就全量来自 item 表，紧随其后的 fts_rebuild 无损补齐
+            conn.execute("DROP TABLE IF EXISTS fts_item")
             conn.execute(FTS_DDL)
             FTS_OK = True
         except Exception:
@@ -226,8 +251,8 @@ def fts_rebuild(conn: sqlite3.Connection) -> None:
     if not FTS_OK:
         return
     rows = conn.execute(
-        "SELECT id, name, notes, region, variety, era, denomination, cert_no, item_code "
-        "FROM item").fetchall()
+        "SELECT id, name, notes, region, variety, era, denomination, cert_no, item_code, "
+        "intro_text, catalog_ref FROM item").fetchall()
     conn.execute("DELETE FROM fts_item")
     for r in rows:
         fts_sync(conn, r["id"], dict(r))
@@ -241,10 +266,13 @@ def fts_sync(conn: sqlite3.Connection, item_id: int, values: dict) -> None:
     if any(values.get(f) for f in FTS_FIELDS):
         conn.execute(
             "INSERT INTO fts_item(rowid, item_id, name, notes, region, variety, era, "
-            "denomination, cert_no, item_code) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "denomination, cert_no, item_code, intro_text, catalog_ref) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (item_id, item_id, values.get("name"), values.get("notes"),
              values.get("region"), values.get("variety"), values.get("era"),
-             values.get("denomination"), values.get("cert_no"), values.get("item_code")))
+             values.get("denomination"), values.get("cert_no"),
+             values.get("item_code"), values.get("intro_text"),
+             values.get("catalog_ref")))
 
 
 def fts_delete(conn: sqlite3.Connection, item_id: int) -> None:

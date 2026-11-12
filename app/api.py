@@ -13,7 +13,7 @@ from datetime import datetime as _dt
 from typing import List, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
@@ -23,6 +23,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from . import models
+from .services import llm as services_llm
 from .auth import COOKIE, hash_password, login_user, make_token, require_role
 from .config import BATCH_DIR, COOKIE_SECURE, DATA_DIR, PHOTO_DIR, PUB_TOKEN
 from .ingest import attach_photo, confirm_item, create_manual, ingest_label
@@ -47,6 +48,7 @@ EXPORT_COLS = [
     ("material", "材质"), ("year_text", "纪年"), ("year_sort", "公历年"),
     ("region", "地域"), ("grade_co", "评级公司"), ("cert_no", "评级编号"),
     ("grade_raw", "分数"), ("grade_scale", "分数制"), ("serial_no", "冠字号"),
+    ("level", "藏品等级"), ("catalog_ref", "目录号"), ("condition_st", "保存状况"),
     ("status", "状态"), ("source", "来源"), ("purchase_price", "采购价"),
     ("purchase_date", "采购日期"), ("est_value", "估值"), ("est_date", "估值日期"),
     ("send_express", "送评单号"), ("send_fee", "送评费用"),
@@ -67,7 +69,7 @@ _SORTS = {
 
 
 def _item_filters(conn, q, category, series, note_type, bank, printer, doc_type,
-                  dynasty, status, location_id, year_from, year_to):
+                  dynasty, status, level, location_id, year_from, year_to):
     """检索条件构造（列表检索与 Excel 导出共用一套语义）。
     返回 (where, vals)；q 命中全文索引且为空时返回 None（确认无结果）。"""
     where, vals = ["1=1"], []
@@ -81,12 +83,14 @@ def _item_filters(conn, q, category, series, note_type, bank, printer, doc_type,
         else:
             like = f"%{q}%"
             cols = ("name", "era", "cert_no", "item_code", "region", "variety",
-                    "notes", "denomination", "serial_no", "bank", "note_type")
+                    "notes", "denomination", "serial_no", "bank", "note_type",
+                    "intro_text", "catalog_ref")
             where.append("(" + " OR ".join(f"{c} LIKE ?" for c in cols) + ")")
             vals.extend([like] * len(cols))
     for col, v in (("category", category), ("series", series),
                    ("note_type", note_type), ("bank", bank), ("printer", printer),
-                   ("doc_type", doc_type), ("dynasty", dynasty), ("status", status)):
+                   ("doc_type", doc_type), ("dynasty", dynasty), ("status", status),
+                   ("level", level)):
         if v:
             where.append(f"{col} = ?")
             vals.append(v)
@@ -215,7 +219,8 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
 # ---------- 字典 ----------
 
 DICT_TYPES = ("category", "dynasty", "bank", "note_type", "series",
-              "printer", "doc_type", "grade_co", "material", "cert_domain")
+              "printer", "doc_type", "grade_co", "material", "cert_domain",
+              "item_level", "condition_st")
 
 
 class DictPayload(BaseModel):
@@ -347,14 +352,14 @@ def search_items(request: Request, q: Optional[str] = None,
                  note_type: Optional[str] = None, bank: Optional[str] = None,
                  printer: Optional[str] = None, doc_type: Optional[str] = None,
                  dynasty: Optional[str] = None, status: Optional[str] = None,
-                 location_id: Optional[int] = None,
+                 level: Optional[str] = None, location_id: Optional[int] = None,
                  year_from: Optional[int] = None, year_to: Optional[int] = None,
                  sort: Optional[str] = None,
                  limit: int = 50, offset: int = 0,
                  user: dict = Depends(require_any)):
     with get_conn() as conn:
         f = _item_filters(conn, q, category, series, note_type, bank, printer,
-                          doc_type, dynasty, status, location_id,
+                          doc_type, dynasty, status, level, location_id,
                           year_from, year_to)
         if f is None:
             return {"ok": True, "total": 0, "items": []}
@@ -412,10 +417,16 @@ def item_detail(item_id: int, user: dict = Depends(require_any)):
         events = conn.execute(
             "SELECT kind, detail, operator, created_at FROM event "
             "WHERE item_id=? ORDER BY id DESC LIMIT 30", (item_id,)).fetchall()
+        vhist = conn.execute(
+            "SELECT old_value, new_value, source, operator, created_at FROM value_history "
+            "WHERE item_id=? ORDER BY id DESC LIMIT 20", (item_id,)).fetchall()
     out = dict(row)
     out["photos"] = [dict(p, url=f"/media/{p['file_path']}".replace("\\", "/"))
                      for p in photos]
     out["events"] = [dict(e) for e in events]
+    out["value_history"] = [dict(v) for v in vhist]
+    if out.get("intro_audio"):
+        out["intro_audio_url"] = f"/media/{out['intro_audio']}"
     return _strip_financial(out, user["role"])
 
 
@@ -510,7 +521,7 @@ def export_xlsx(request: Request, q: Optional[str] = None,
                 note_type: Optional[str] = None, bank: Optional[str] = None,
                 printer: Optional[str] = None, doc_type: Optional[str] = None,
                 dynasty: Optional[str] = None, status: Optional[str] = None,
-                location_id: Optional[int] = None,
+                level: Optional[str] = None, location_id: Optional[int] = None,
                 year_from: Optional[int] = None, year_to: Optional[int] = None,
                 sort: Optional[str] = None,
                 _: dict = Depends(require_admin)):
@@ -521,7 +532,7 @@ def export_xlsx(request: Request, q: Optional[str] = None,
     ws.append([c[1] for c in EXPORT_COLS])
     with get_conn() as conn:
         f = _item_filters(conn, q, category, series, note_type, bank, printer,
-                          doc_type, dynasty, status, location_id,
+                          doc_type, dynasty, status, level, location_id,
                           year_from, year_to)
         if f is None:
             rows = []
@@ -864,6 +875,137 @@ def delete_logo(_: dict = Depends(require_admin)):
     return {"ok": True}
 
 
+# ---------- 讲解介绍：AI/模板生成 + TTS 30秒语音（展签二维码即扫即听） ----------
+
+VOICES = {"xiaoxiao": "zh-CN-XiaoxiaoNeural",
+          "yunjian": "zh-CN-YunjianNeural",
+          "yunxi": "zh-CN-YunxiNeural"}
+
+
+def _intro_template(d: dict) -> str:
+    """无大模型插口时的模板兜底：由档案字段拼一段口语化介绍。"""
+    parts = []
+    if d.get("name"):
+        parts.append(f"这件藏品是{d['name']}")
+    era = d.get("year_text") or d.get("era")
+    if era:
+        parts.append(f"铸造发行于{era}")
+    if d.get("bank"):
+        parts.append(f"由{d['bank']}发行")
+    if d.get("printer"):
+        parts.append(f"{d['printer']}印制")
+    if d.get("denomination"):
+        parts.append(f"面值{d['denomination']}")
+    if d.get("material"):
+        parts.append(f"{d['material']}质")
+    s = "，".join(parts)
+    if s:
+        s += "。"
+    if d.get("variety"):
+        s += f"版别特征：{d['variety']}。"
+    if d.get("level"):
+        s += f"本馆定级为{d['level']}。"
+    return s[:200]
+
+
+@router.post("/items/{item_id}/intro/generate")
+def intro_generate(item_id: int, user: dict = Depends(require_staff)):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM item WHERE id=?", (item_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "藏品不存在")
+        d = dict(row)
+    summary = "；".join(f"{k}：{v}" for k, v in {
+        "名称": d.get("name"), "品类": d.get("category"), "系列": d.get("series"),
+        "机构": d.get("bank"), "券种": d.get("note_type"), "年号": d.get("era"),
+        "面值": d.get("denomination"), "纪年": d.get("year_text"),
+        "印刷厂": d.get("printer"), "材质": d.get("material"), "版别": d.get("variety"),
+        "评级": " ".join(str(x) for x in (d.get("grade_co"), d.get("grade_raw")) if x),
+        "备注": d.get("notes"),
+    }.items() if v)
+    if services_llm.is_enabled():
+        prompt = ("你是钱币博物馆的讲解员。根据下面的藏品档案，写一段面向普通观众的口语化介绍，"
+                  "约120字（朗读约30秒），讲来历和看点，不要罗列字段、不要客套的开头和结尾：\n"
+                  + summary)
+        text = services_llm.chat(prompt, None, 400).strip().strip('"')
+        source = "AI生成"
+    else:
+        text = _intro_template(d)
+        source = "模板生成"
+    text = text[:220]
+    with get_conn() as conn:
+        conn.execute("UPDATE item SET intro_text=? WHERE id=?", (text, item_id))
+        conn.execute(
+            "INSERT INTO event(item_id, kind, detail, operator) VALUES(?,?,?,?)",
+            (item_id, "介绍生成", f"{source}，{len(text)}字", user["username"]))
+        models.fts_sync(conn, item_id, {
+            **{k: row[k] for k in ("name", "notes", "region", "variety", "era",
+                                   "denomination", "cert_no", "item_code")},
+            "intro_text": text})
+    return {"ok": True, "text": text, "source": source}
+
+
+@router.post("/items/{item_id}/intro/tts")
+async def intro_tts(item_id: int, payload: Optional[dict] = Body(default={}),
+                    user: dict = Depends(require_staff)):
+    with get_conn() as conn:
+        row = conn.execute("SELECT intro_text FROM item WHERE id=?",
+                           (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "藏品不存在")
+    text = (row["intro_text"] or "").strip()
+    if not text:
+        raise HTTPException(400, "请先填写或生成介绍文案")
+    text = text[:240]   # 约30秒朗读
+    voice = VOICES.get((payload or {}).get("voice", "xiaoxiao"), VOICES["xiaoxiao"])
+    import edge_tts
+    d = PHOTO_DIR / str(item_id)
+    d.mkdir(parents=True, exist_ok=True)
+    out = d / "intro.mp3"
+    try:
+        await edge_tts.Communicate(text, voice).save(str(out))
+    except Exception as e:
+        raise HTTPException(502, f"语音合成失败（需可访问微软TTS服务）：{str(e)[:120]}")
+    rel = f"{item_id}/intro.mp3"
+    with get_conn() as conn:
+        conn.execute("UPDATE item SET intro_audio=? WHERE id=?", (rel, item_id))
+    return {"ok": True, "url": f"/media/{rel}"}
+
+
+@router.post("/items/{item_id}/estimate")
+def estimate_ep(item_id: int, user: dict = Depends(require_staff)):
+    """AI 参考估值：基于档案生成参考区间。明确标注为参考，非市场成交价。"""
+    if not services_llm.is_enabled():
+        raise HTTPException(400, "AI参考估值需要配置大模型插口（compose 环境变量）")
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM item WHERE id=?", (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "藏品不存在")
+    d = dict(row)
+    summary = "；".join(f"{k}：{v}" for k, v in {
+        "名称": d.get("name"), "品类": d.get("category"), "系列": d.get("series"),
+        "机构": d.get("bank"), "券种": d.get("note_type"), "纪年": d.get("year_text"),
+        "面值": d.get("denomination"), "评级": " ".join(
+            str(x) for x in (d.get("grade_co"), d.get("grade_raw")) if x),
+        "版别": d.get("variety"), "等级": d.get("level"),
+    }.items() if v)
+    import json as _json
+    import re as _re
+    prompt = ("你是资深钱币评估师。根据藏品档案给出当前市场参考估值区间（人民币元），"
+              '只输出JSON：{"low": 数字, "high": 数字, "reason": "不超过50字的理由"}。'
+              "依据不足时放宽区间并说明：\n" + summary)
+    raw = services_llm.chat(prompt, None, 300)
+    m = _re.search(r"\{.*\}", raw, _re.S)
+    if not m:
+        raise HTTPException(502, "AI未返回可解析结果，请重试")
+    try:
+        data = _json.loads(m.group(0))
+    except Exception:
+        raise HTTPException(502, "AI返回内容无法解析，请重试")
+    return {"ok": True, "low": data.get("low"), "high": data.get("high"),
+            "reason": data.get("reason"), "note": "AI参考估值，非市场成交价"}
+
+
 # ---------- 二维码生成（展签用） ----------
 
 @router.get("/qr")
@@ -881,7 +1023,8 @@ def qr_image(text: str, _: dict = Depends(require_any)):
 PUB_FIELDS = ("item_code", "name", "category", "series", "dynasty", "bank",
               "note_type", "printer", "doc_type", "era", "denomination",
               "variety", "material", "year_text", "region",
-              "grade_co", "grade_raw", "cert_no")
+              "grade_co", "grade_raw", "cert_no",
+              "level", "catalog_ref", "intro_text")
 
 
 @router.get("/pub/item/{code}")
