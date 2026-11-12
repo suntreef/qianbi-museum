@@ -11,9 +11,6 @@
 <section id="session" hidden>
   <div class="statsbar" id="tally"></div>
   <div class="filters">
-    <input id="scan" placeholder="输入/扫描 编号后回车" style="flex:1" autocomplete="off">
-  </div>
-  <div class="filters">
     <button id="finishBtn">✅ 结束盘点，出差异报告</button>
     <button id="resetBtn">重新开始</button>
   </div>
@@ -24,6 +21,12 @@
     <tbody></tbody>
   </table>
 </section>
+
+<nav class="fab-bar" id="scanBar" hidden>
+  <input id="scan" placeholder="输入/扫描 编号后回车" autocomplete="off"
+    style="flex:1;padding:15px 16px;font-size:17px;border:none;border-radius:14px;
+           box-shadow:var(--shadow-2);font-family:inherit">
+</nav>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -44,6 +47,25 @@ function toast(msg, bad){
   document.body.appendChild(d);
   setTimeout(()=>d.remove(), 3500);
 }
+// 盘点确认感：在场=清脆一声；不符/未知=三段震动+低音
+let _ac = null;
+function beep(freq = 1250, ms = 80) {
+  try {
+    _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = _ac.createOscillator(), g = _ac.createGain();
+    o.type = "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(.16, _ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001, _ac.currentTime + ms / 1000);
+    o.connect(g); g.connect(_ac.destination);
+    o.start(); o.stop(_ac.currentTime + ms / 1000);
+  } catch (e) {}
+}
+function feedback(kind) {
+  if (!navigator.vibrate) {}
+  else if (kind === 'ok') navigator.vibrate(28);
+  else navigator.vibrate([60, 40, 60]);
+  beep(kind === 'ok' ? 1250 : 460);
+}
 
 async function loadLocs(){
   const locs = await j('/api/locations');
@@ -60,6 +82,7 @@ async function start(){
   expected = d.items;
   if(!expected.length) return alert('该范围下没有在库藏品');
   $('#session').hidden = false;
+  $('#scanBar').hidden = false;
   $('#report').innerHTML = '';
   render();
   $('#scan').focus();
@@ -84,12 +107,17 @@ async function doScan(code){
   if(!code) return;
   $('#scan').value = '';
   const it = await j('/api/items/by-code/' + encodeURIComponent(code));
-  if(!it) return toast(`未找到「${code}」`, true);
+  if(!it){ feedback('bad'); return toast(`未找到「${code}」`, true); }
   const row = expected.find(x => x.id === it.id);
   if(row){
     row.state = (locId && it.location_id === locId || !locId) ? '在场' : '位置不符';
-    toast(`✓ ${it.item_code || it.name}`);
+    feedback(row.state === '在场' ? 'ok' : 'bad');
+    toast(row.state === '在场'
+      ? `✓ ${it.item_code || it.name}`
+      : `⚠️ ${it.item_code || code} 账在别处（${it.location_name || '未入库位'}）`,
+      row.state !== '在场');
   } else {
+    feedback('bad');
     toast(`⚠️ 「${it.item_code || code}」不属于本盘点范围（状态非在库或不在该库位）`, true);
   }
   render();

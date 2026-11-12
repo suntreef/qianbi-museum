@@ -340,12 +340,23 @@ def search_items(request: Request, q: Optional[str] = None,
         total = conn.execute(
             f"SELECT COUNT(*) FROM item WHERE {' AND '.join(where)}", vals).fetchone()[0]
         rows = conn.execute(
-            f"SELECT * FROM item WHERE {' AND '.join(where)} "
-            "ORDER BY id DESC LIMIT ? OFFSET ?", [*vals, limit, offset]).fetchall()
+            f"""SELECT i.*,
+                   (SELECT p.file_path FROM photo p
+                     WHERE p.item_id = i.id AND p.origin = 'archive'
+                     ORDER BY CASE p.shot_type WHEN 'front' THEN 0
+                              WHEN 'back' THEN 1 ELSE 2 END, p.id
+                     LIMIT 1) AS thumb_path
+            FROM item i WHERE {' AND '.join(where)}
+            ORDER BY i.id DESC LIMIT ? OFFSET ?""", [*vals, limit, offset]).fetchall()
 
     role = user["role"]
-    return {"ok": True, "total": total,
-            "items": [_strip_financial(dict(r), role) for r in rows]}
+    items = []
+    for r in rows:
+        d = dict(r)
+        tp = d.pop("thumb_path", None)
+        d["thumb"] = f"/media/{tp}" if tp else None
+        items.append(_strip_financial(d, role))
+    return {"ok": True, "total": total, "items": items}
 
 
 @router.get("/items/by-code/{code}")

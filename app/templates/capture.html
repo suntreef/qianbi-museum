@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="actions">
-  <label class="bigbtn primary">📷 拍评级标签（可连拍多件）
+<p class="hint">拍完标签出一张确认卡：核对信息 → 拍正反面 → 点「确认入库」。
+识别不出的字段先空着，管理员后台补——宁空勿错。入库成功有震动与提示音确认。</p>
+<div id="queue"></div>
+
+<nav class="fab-bar">
+  <label class="bigbtn primary">📷 拍评级标签（可连拍）
     <input type="file" accept="image/*" capture="environment" multiple hidden id="labelInput">
   </label>
-  <button class="bigbtn" id="manualBtn">✍️ 手动录入（无标签/裸币）</button>
-</section>
-<p class="hint">拍完标签出一张确认卡：核对信息 → 拍正反面 → 点「确认入库」。
-识别不出的字段先空着，管理员后台补——宁空勿错。</p>
-<div id="queue"></div>
+  <button class="bigbtn" id="manualBtn">✍️ 手动录入</button>
+</nav>
 
 <template id="cardTpl">
   <div class="card">
@@ -61,6 +62,23 @@
 
 <script>
 const $ = s => document.querySelector(s);
+// 操作确认感：短促震动 + 清脆提示音（无外部音频文件）
+let _ac = null;
+function beep(freq = 1250, ms = 80) {
+  try {
+    _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = _ac.createOscillator(), g = _ac.createGain();
+    o.type = "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(.16, _ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001, _ac.currentTime + ms / 1000);
+    o.connect(g); g.connect(_ac.destination);
+    o.start(); o.stop(_ac.currentTime + ms / 1000);
+  } catch (e) {}
+}
+function feedback(good = true) {
+  if (navigator.vibrate) navigator.vibrate(good ? 28 : [60, 40, 60]);
+  beep(good ? 1250 : 520);
+}
 const DICT_FIELDS = {category:'category', series:'series', dynasty:'dynasty',
   bank:'bank', note_type:'note_type', printer:'printer', doc_type:'doc_type',
   grade_co:'grade_co'};
@@ -101,6 +119,7 @@ async function handleLabelFiles(files){
     if(!d) return;
     if(d.dupe){
       dup++;
+      feedback(false);
       toast(`⚠️ 重复：编号 ${d.cert_no} 已入库（${d.existing.item_code||''} ${d.existing.name||''}）`, false);
       continue;
     }
@@ -190,8 +209,8 @@ async function confirmCard(card, id){
   });
   if(r.status===401) return location='/login';
   const d = await r.json();
-  if(d.ok){ card.remove(); toast('✅ 已入库 ' + d.item_code); }
-  else toast('保存失败：' + (d.detail || d.error || ''), false);
+  if(d.ok){ feedback(true); card.remove(); toast('✅ 已入库 ' + d.item_code); }
+  else { feedback(false); toast('保存失败：' + (d.detail || d.error || ''), false); }
 }
 
 $('#labelInput').onchange = e => { handleLabelFiles([...e.target.files]); e.target.value=''; };
