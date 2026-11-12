@@ -10,6 +10,8 @@
 
 <script>
 const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function j(url){
   const r = await fetch(url);
   if(r.status===401) return location='/login';
@@ -35,6 +37,11 @@ const ROWS = [
       <td><a href="${link}">去处理 →</a></td>`;
     tb.appendChild(tr);
   }
+  const bk = document.createElement('tr');
+  bk.innerHTML = `<td>数据库自动备份（容器内每日，保留30份）</td>
+    <td class="${d.db_backups ? 'okc' : 'badc'}"><b>${d.db_backups || 0}</b> 份</td>
+    <td><span class="hint">最新：${esc(d.db_backup_last) || '尚未生成'}</span></td>`;
+  tb.appendChild(bk);
 })();
 </script>
 {% endblock %}

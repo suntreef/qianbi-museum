@@ -15,10 +15,18 @@
   </select>
   <input id="yFrom" type="number" placeholder="年份从" style="width:90px">
   <input id="yTo" type="number" placeholder="到" style="width:70px">
+  <select id="fsort">
+    <option value="">最新录入</option>
+    <option value="old">录入先后</option>
+    <option value="year">年份 ↑</option>
+    <option value="year_desc">年份 ↓</option>
+    <option value="value">估值 ↓</option>
+    <option value="code">编号 ↑</option>
+  </select>
   <select id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
   <button class="primary" id="go">查询</button>
   {% if user and user.role == 'admin' %}
-  <a class="btnlink" href="/api/export/xlsx" download>⬇️ 导出Excel</a>
+  <a class="btnlink" href="#" id="exportBtn">⬇️ 导出Excel</a>
   <a class="btnlink" href="#" id="importBtn">⬆️ 导入Excel</a>
   <input type="file" id="importFile" accept=".xlsx" hidden>
   <a class="btnlink" href="/api/backup/db" download>💾 备份数据库</a>
@@ -172,6 +180,7 @@ async function search(p){
   if($('#yTo').value) params.set('year_to', $('#yTo').value);
   if($('#fLocation').value)
     params.set('location_id', $('#fLocation').value === 'none' ? -1 : $('#fLocation').value);
+  if($('#fsort').value) params.set('sort', $('#fsort').value);
   params.set('limit', PAGE);
   params.set('offset', page * PAGE);
   const d = await j('/api/items?' + params);
@@ -185,6 +194,20 @@ $('#fLocation').onchange = () => search(0);
 mq.addEventListener('change', render);
 
 {% if user and user.role == 'admin' %}
+$('#exportBtn').onclick = e => {
+  e.preventDefault();
+  const p = new URLSearchParams();
+  if($('#q').value) p.set('q', $('#q').value);
+  if($('#fCategory').value) p.set('category', $('#fCategory').value);
+  if($('#fSeries').value) p.set('series', $('#fSeries').value);
+  if($('#fStatus').value) p.set('status', $('#fStatus').value);
+  if($('#yFrom').value) p.set('year_from', $('#yFrom').value);
+  if($('#yTo').value) p.set('year_to', $('#yTo').value);
+  if($('#fLocation').value)
+    p.set('location_id', $('#fLocation').value === 'none' ? -1 : $('#fLocation').value);
+  if($('#fsort').value) p.set('sort', $('#fsort').value);
+  location.href = '/api/export/xlsx?' + p;
+};
 $('#importBtn').onclick = e => { e.preventDefault(); $('#importFile').click(); };
 $('#importFile').onchange = async e => {
   const f = e.target.files[0];

@@ -18,6 +18,7 @@ shutil.rmtree(os.environ["DATA_DIR"], ignore_errors=True)
 
 from PIL import Image  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from openpyxl import load_workbook as _load_wb  # noqa: E402
 from app.main import app  # noqa: E402
 
 ok_count = 0
@@ -458,5 +459,32 @@ with TestClient(app) as c:
     r = c.post(f"/api/items/{n2}", json={"fields": {"item_code": code1}}).json()
     check("编号冲突报错", r["ok"] is False and "已被" in r.get("error", ""),
           str(r)[:90])
+
+    # ---------- 本轮优化回归：缩略图 / 筛选导出 / 排序 / 自动备份 ----------
+    from app.config import PHOTO_DIR as _PD
+    r = c.get("/api/items", params={"limit": 5}).json()
+    thumb = next((it["thumb"] for it in r["items"] if it["thumb"]), None)
+    check("缩略图生成", thumb is not None and "/thumbs/" in thumb, str(thumb))
+    if thumb:
+        rel = thumb.split("/media/")[1]
+        check("缩略图文件落盘", os.path.exists(os.path.join(str(_PD), rel)), rel)
+
+    r = c.get("/api/export/xlsx", params={"category": "纸币"})
+    check("导出-按筛选请求成功", r.status_code == 200 and len(r.content) > 500,
+          f"{len(r.content)}B")
+    _wb = _load_wb(io.BytesIO(r.content))
+    _rows = list(_wb.active.iter_rows(values_only=True))
+    _cats = {row[2] for row in _rows[1:]}
+    check("导出-筛选语义正确", _cats and all(ca == "纸币" for ca in _cats), str(_cats))
+
+    r = c.get("/api/items", params={"sort": "year", "limit": 50}).json()
+    years = [it["year_sort"] for it in r["items"] if it["year_sort"] is not None]
+    check("排序-年份升序", years == sorted(years), str(years[:6]))
+
+    from app.backup import run_backup_now
+    _bp = run_backup_now()
+    check("容器内自动备份", _bp is not None and os.path.exists(_bp), str(_bp))
+    d = c.get("/api/health-report").json()
+    check("备份统计可见", d.get("db_backups", 0) >= 1, str(d.get("db_backups")))
 
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

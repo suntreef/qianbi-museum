@@ -24,9 +24,10 @@ from starlette.concurrency import run_in_threadpool
 
 from . import models
 from .auth import COOKIE, hash_password, login_user, make_token, require_role
-from .config import BATCH_DIR, COOKIE_SECURE, PHOTO_DIR, PUB_TOKEN
+from .config import BATCH_DIR, COOKIE_SECURE, DATA_DIR, PHOTO_DIR, PUB_TOKEN
 from .ingest import attach_photo, confirm_item, create_manual, ingest_label
 from .models import get_conn, get_setting, set_setting
+from .services import photos
 
 router = APIRouter(prefix="/api")
 
@@ -54,6 +55,54 @@ EXPORT_COLS = [
 
 FINANCIAL = ("purchase_price", "est_value")
 UPLOAD_MAX = 16 * 1024 * 1024
+MAX_BATCH_BYTES = 600 * 1024 * 1024   # 单次批量上传总大小上限
+
+_SORTS = {
+    "": "id DESC", "new": "id DESC", "old": "id ASC",
+    "year": "year_sort IS NULL, year_sort ASC",
+    "year_desc": "year_sort IS NULL, year_sort DESC",
+    "value": "est_value IS NULL, est_value DESC",
+    "code": "item_code ASC",
+}
+
+
+def _item_filters(conn, q, category, series, note_type, bank, printer, doc_type,
+                  dynasty, status, location_id, year_from, year_to):
+    """检索条件构造（列表检索与 Excel 导出共用一套语义）。
+    返回 (where, vals)；q 命中全文索引且为空时返回 None（确认无结果）。"""
+    where, vals = ["1=1"], []
+    if q:
+        ids = models.fts_search_ids(conn, q)
+        if ids is not None:
+            if not ids:
+                return None
+            where.append(f"id IN ({','.join('?' * len(ids))})")
+            vals.extend(ids)
+        else:
+            like = f"%{q}%"
+            cols = ("name", "era", "cert_no", "item_code", "region", "variety",
+                    "notes", "denomination", "serial_no", "bank", "note_type")
+            where.append("(" + " OR ".join(f"{c} LIKE ?" for c in cols) + ")")
+            vals.extend([like] * len(cols))
+    for col, v in (("category", category), ("series", series),
+                   ("note_type", note_type), ("bank", bank), ("printer", printer),
+                   ("doc_type", doc_type), ("dynasty", dynasty), ("status", status)):
+        if v:
+            where.append(f"{col} = ?")
+            vals.append(v)
+    if year_from is not None:
+        where.append("year_sort >= ?")
+        vals.append(year_from)
+    if year_to is not None:
+        where.append("year_sort <= ?")
+        vals.append(year_to)
+    if location_id is not None:
+        if location_id == -1:
+            where.append("location_id IS NULL")
+        else:
+            where.append("location_id = ?")
+            vals.append(location_id)
+    return where, vals
 
 
 def _strip_financial(d: dict, role: str) -> dict:
@@ -300,45 +349,17 @@ def search_items(request: Request, q: Optional[str] = None,
                  dynasty: Optional[str] = None, status: Optional[str] = None,
                  location_id: Optional[int] = None,
                  year_from: Optional[int] = None, year_to: Optional[int] = None,
+                 sort: Optional[str] = None,
                  limit: int = 50, offset: int = 0,
                  user: dict = Depends(require_any)):
-    where, vals = ["1=1"], []
     with get_conn() as conn:
-        if q:
-            # 中文全文索引优先（≥3 字子串，走 trigram 索引，大库也快）；
-            # 不足 3 字或库不支持 FTS 时降级 LIKE
-            ids = models.fts_search_ids(conn, q)
-            if ids is not None:
-                if not ids:
-                    return {"ok": True, "total": 0, "items": []}
-                where.append(f"id IN ({','.join('?' * len(ids))})")
-                vals.extend(ids)
-            else:
-                like = f"%{q}%"
-                cols = ("name", "era", "cert_no", "item_code", "region", "variety",
-                        "notes", "denomination", "serial_no", "bank", "note_type")
-                where.append("(" + " OR ".join(f"{c} LIKE ?" for c in cols) + ")")
-                vals.extend([like] * len(cols))
-        for col, v in (("category", category), ("series", series),
-                       ("note_type", note_type), ("bank", bank),
-                       ("printer", printer), ("doc_type", doc_type),
-                       ("dynasty", dynasty), ("status", status)):
-            if v:
-                where.append(f"{col}=?")
-                vals.append(v)
-        if year_from is not None:
-            where.append("year_sort >= ?")
-            vals.append(year_from)
-        if year_to is not None:
-            where.append("year_sort <= ?")
-            vals.append(year_to)
-        if location_id is not None:
-            if location_id == -1:      # “未入库位”
-                where.append("location_id IS NULL")
-            else:
-                where.append("location_id = ?")
-                vals.append(location_id)
-
+        f = _item_filters(conn, q, category, series, note_type, bank, printer,
+                          doc_type, dynasty, status, location_id,
+                          year_from, year_to)
+        if f is None:
+            return {"ok": True, "total": 0, "items": []}
+        where, vals = f
+        order = _SORTS.get(sort or "", "id DESC")
         limit = max(1, min(limit, 200))
         total = conn.execute(
             f"SELECT COUNT(*) FROM item WHERE {' AND '.join(where)}", vals).fetchone()[0]
@@ -350,13 +371,14 @@ def search_items(request: Request, q: Optional[str] = None,
                               WHEN 'back' THEN 1 ELSE 2 END, p.id
                      LIMIT 1) AS thumb_path
             FROM item i WHERE {' AND '.join(where)}
-            ORDER BY i.id DESC LIMIT ? OFFSET ?""", [*vals, limit, offset]).fetchall()
+            ORDER BY {order} LIMIT ? OFFSET ?""", [*vals, limit, offset]).fetchall()
 
     role = user["role"]
     items = []
     for r in rows:
         d = dict(r)
         tp = d.pop("thumb_path", None)
+        tp = photos.ensure_thumb(tp) if tp else None   # 懒生成 480px 缩略图
         d["thumb"] = f"/media/{tp}" if tp else None
         items.append(_strip_financial(d, role))
     return {"ok": True, "total": total, "items": items}
@@ -391,7 +413,8 @@ def item_detail(item_id: int, user: dict = Depends(require_any)):
             "SELECT kind, detail, operator, created_at FROM event "
             "WHERE item_id=? ORDER BY id DESC LIMIT 30", (item_id,)).fetchall()
     out = dict(row)
-    out["photos"] = [dict(p, url=f"/media/{p['file_path']}") for p in photos]
+    out["photos"] = [dict(p, url=f"/media/{p['file_path']}".replace("\\", "/"))
+                     for p in photos]
     out["events"] = [dict(e) for e in events]
     return _strip_financial(out, user["role"])
 
@@ -482,15 +505,32 @@ def stats(user: dict = Depends(require_any)):
 # ---------- Excel 导出（含价格，仅管理员） ----------
 
 @router.get("/export/xlsx")
-def export_xlsx(_: dict = Depends(require_admin)):
+def export_xlsx(request: Request, q: Optional[str] = None,
+                category: Optional[str] = None, series: Optional[str] = None,
+                note_type: Optional[str] = None, bank: Optional[str] = None,
+                printer: Optional[str] = None, doc_type: Optional[str] = None,
+                dynasty: Optional[str] = None, status: Optional[str] = None,
+                location_id: Optional[int] = None,
+                year_from: Optional[int] = None, year_to: Optional[int] = None,
+                sort: Optional[str] = None,
+                _: dict = Depends(require_admin)):
+    """按当前筛选条件导出（与检索页同一套筛选语义），不带参数=导全部。"""
     wb = Workbook()
     ws = wb.active
     ws.title = "藏品台账"
     ws.append([c[1] for c in EXPORT_COLS])
     with get_conn() as conn:
-        rows = conn.execute(
-            f"SELECT {', '.join(c[0] for c in EXPORT_COLS)} FROM item ORDER BY id"
-        ).fetchall()
+        f = _item_filters(conn, q, category, series, note_type, bank, printer,
+                          doc_type, dynasty, status, location_id,
+                          year_from, year_to)
+        if f is None:
+            rows = []
+        else:
+            where, vals = f
+            order = _SORTS.get(sort or "", "id DESC")
+            rows = conn.execute(
+                f"SELECT {', '.join(c[0] for c in EXPORT_COLS)} FROM item "
+                f"WHERE {' AND '.join(where)} ORDER BY {order}", vals).fetchall()
     for r in rows:
         d = dict(r)
         d["status"] = STATUS_CN.get(d["status"], d["status"])
@@ -718,9 +758,6 @@ async def append_batch(job_id: int, files: List[UploadFile] = File(...),
     return {"ok": True, "job_id": job_id, "queued": queued}
 
 
-MAX_BATCH_BYTES = 600 * 1024 * 1024   # 单次批量上传总大小上限
-
-
 async def _save_batch_files(job_id: int, files: List[UploadFile]) -> int:
     d = BATCH_DIR / str(job_id)
     d.mkdir(parents=True, exist_ok=True)
@@ -871,6 +908,8 @@ def pub_item(code: str, request: Request):
 def health_report(_: dict = Depends(require_admin)):
     with get_conn() as conn:
         one = lambda sql: conn.execute(sql).fetchone()[0]
+        bdir = DATA_DIR / "backups"
+        backups = sorted(bdir.glob("museum_*.db")) if bdir.exists() else []
         return {
             "ok": True,
             "no_location": one(
@@ -893,6 +932,8 @@ def health_report(_: dict = Depends(require_admin)):
             "dup_photos": one(
                 "SELECT COUNT(*) FROM (SELECT phash FROM photo WHERE phash IS NOT NULL "
                 "GROUP BY phash HAVING COUNT(*) > 1)"),
+            "db_backups": len(backups),
+            "db_backup_last": backups[-1].name if backups else None,
         }
 
 

@@ -16,11 +16,18 @@
   td { padding: 9px 12px; border-bottom: 1px solid #eee; font-size: 15px; }
   td:first-child { color: #8a7a52; width: 90px; }
   footer { text-align: center; color: #999; font-size: 12px; padding: 20px; }
+  #lightbox { position: fixed; inset: 0; background: rgba(22,20,15,.93);
+    display: flex; align-items: center; justify-content: center;
+    cursor: zoom-out; z-index: 99; }
+  #lightbox img { max-width: 96vw; max-height: 96vh; border-radius: 10px; }
 </style>
 </head>
 <body>
 <header>🏛️ {{ site.name }} · 数字导览</header>
 <main id="main"><p>加载中…</p></main>
+<div id="lightbox" hidden onclick="this.hidden=true">
+  <img id="lbImg" alt="">
+</div>
 <footer>本页为馆内导览页，仅展示藏品公开信息</footer>
 
 <script>
@@ -44,6 +51,17 @@ fetch('/api/pub/item/' + encodeURIComponent('{{ code }}')).then(r => {
   html += '</table>';
   document.getElementById('main').innerHTML = html;
   document.title = d.name || '藏品导览';
+  // 照片点击放大
+  const box = document.querySelector('.photos');
+  if(box){
+    box.querySelectorAll('img').forEach(im => {
+      im.style.cursor = 'zoom-in';
+      im.onclick = () => {
+        document.getElementById('lbImg').src = im.src;
+        document.getElementById('lightbox').hidden = false;
+      };
+    });
+  }
 }).catch(() => {
   document.getElementById('main').innerHTML =
     '<p>未找到该藏品，请核对展签上的二维码。</p>';

@@ -62,10 +62,36 @@ def save_image(data: bytes, item_id: int, shot_type: str,
     return {
         "shot_type": shot_type,
         "origin": origin,
-        "file_path": str(path.relative_to(PHOTO_DIR)),
+        # URL 用正斜杠（Windows 上 relative_to 会给出反斜杠）
+        "file_path": str(path.relative_to(PHOTO_DIR)).replace("\\", "/"),
         "exif_time": exif_time,
         "phash": ahash(img),
     }
+
+
+def ensure_thumb(rel_path: str) -> Optional[str]:
+    """为已存照片生成/复用 480px 缩略图（同目录 thumbs/ 下），返回相对路径。
+
+    列表卡片流用缩略图，点开详情才加载原图——3000 件的列表秒开。
+    """
+    src = PHOTO_DIR / rel_path   # Path 兼容正斜杠（含 Windows）
+    if not src.exists():
+        return None
+    dst = src.parent / "thumbs" / (src.stem + ".jpg")
+    rel = str(dst.relative_to(PHOTO_DIR)).replace("\\", "/")
+    if dst.exists():
+        return rel
+    try:
+        img = Image.open(src)
+        img.load()
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        img.thumbnail((480, 480), Image.LANCZOS)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        img.save(dst, "JPEG", quality=82)
+        return rel
+    except Exception:
+        return None
 
 
 def hamming(a: str, b: str) -> int:

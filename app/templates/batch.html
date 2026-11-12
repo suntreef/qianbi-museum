@@ -52,9 +52,22 @@ async function showDetail(id){
   const d = await j('/api/batch/' + id);
   if(!d) return;
   currentJob = id;
-  $('#detailSummary').textContent = `任务 #${id} 明细`;
+  $('#detailSummary').innerHTML = `任务 #${id} 明细
+    <label class="btnlink" style="cursor:pointer;margin-left:10px">➕ 追加照片（≤60张）
+      <input type="file" accept="image/*" multiple hidden id="appendInput"></label>
+    <a class="btnlink" href="/items?__draft=1" style="margin-left:8px">去确认草稿</a>`;
   $('#items tbody').innerHTML = d.items.map(it =>
     `<tr><td>${esc(it.filename)}</td><td>${ST[it.status]||it.status}</td><td>${esc(it.message)}</td></tr>`).join('');
+  const ap = document.getElementById('appendInput');
+  if(ap) ap.onchange = async e => {
+    const files = [...e.target.files].slice(0, 60);
+    if(!files.length) return;
+    const fd = new FormData();
+    files.forEach(f => fd.append('files', f));
+    const d2 = await j(`/api/batch/${id}/files`, {method:'POST', body: fd});
+    if(d2 && d2.ok){ toast(`已追加 ${d2.queued} 张进入队列`); load(); showDetail(id); }
+    e.target.value = '';
+  };
   $('#jobDetail').hidden = false;
 }
 

@@ -59,6 +59,12 @@
   <tbody></tbody>
 </table>
 
+<div id="lightbox" hidden onclick="this.hidden=true"
+     style="position:fixed;inset:0;background:rgba(22,20,15,.93);z-index:200;
+            display:flex;align-items:center;justify-content:center;cursor:zoom-out">
+  <img id="lbImg" style="max-width:96vw;max-height:96vh;border-radius:10px" alt="">
+</div>
+
 <script>
 const ID = {{ item_id }};
 const $ = s => document.querySelector(s);
@@ -152,6 +158,9 @@ function renderPhotos(photos){
     box.innerHTML = `<img src="${p.url}" loading="lazy">
       <span class="ptag">${({front:'正面',back:'背面',edge:'边齿',detail:'局部',label:'标签',holder:'评级盒',reference:'官网图'})[p.shot_type]||p.shot_type}
       ${p.origin==='reference'?'·参考':''}</span>`;
+    const im = box.querySelector('img');
+    im.style.cursor = 'zoom-in';
+    im.onclick = () => openLightbox(p.url);   // 点开看大图，品相细节一目了然
     const del = document.createElement('button');
     del.className = 'pdel'; del.textContent = '✕';
     del.onclick = async () => {
@@ -162,6 +171,11 @@ function renderPhotos(photos){
     box.appendChild(del);
     row.appendChild(box);
   }
+}
+function openLightbox(src){
+  const lb = document.getElementById('lightbox');
+  document.getElementById('lbImg').src = src;
+  lb.hidden = false;
 }
 
 $('#save').onclick = async () => {

@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from . import models
 from .api import router as api_router
 from .auth import ensure_default_admin
+from .backup import start_daily
 from .batch import start_worker
 from .config import LLM_API_KEY, PHOTO_DIR, STATIC_DIR
 from .seeds.dict_seed import load_seeds
@@ -21,6 +22,7 @@ async def lifespan(_: FastAPI):
     load_seeds()
     ensure_default_admin()
     start_worker()
+    start_daily()
     yield
 
 
@@ -37,6 +39,12 @@ async def security_headers(request: Request, call_next):
         "Content-Security-Policy",
         "default-src 'self'; img-src 'self' data:; "
         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+    # 藏品照片与缩略图内容不变，放心缓存一周；带版本号的静态资源同理
+    p = request.url.path
+    if p.startswith("/media/"):
+        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
+    elif p.startswith("/static/"):
+        resp.headers["Cache-Control"] = "public, max-age=604800"
     return resp
 
 
