@@ -13,12 +13,13 @@ from uuid import uuid4
 from . import models
 from .adapters import rules, webfetch
 from .adapters.registry import company_for_url, lookup_url_for
-from .config import ITEM_CODE_PREFIX, PHOTO_DIR
+from .config import PHOTO_DIR
 from .models import get_conn
 from .services import ocr, photos, qr, years
 
 # 确认时允许写入的字段白名单（与 item 表列一一对应）
 FIELD_WHITELIST = [
+    "item_code",
     "category", "dynasty", "bank", "note_type", "series", "printer", "doc_type",
     "name", "era", "denomination", "variety", "material",
     "year_text", "region", "grade_co", "cert_no", "cert_url",
@@ -178,6 +179,33 @@ VALID_STATUS = ["draft", "in_stock", "reviewing", "exhibited",
 _NUMERIC_FIELDS = ("purchase_price", "est_value", "send_fee")
 
 
+def _dict_code(conn, dtype: str, name) -> Optional[str]:
+    """从字典取品类/时代编码（编号体系用）。"""
+    if not name:
+        return None
+    r = conn.execute("SELECT code FROM dict_entry WHERE type=? AND name=?",
+                     (dtype, name)).fetchone()
+    return (r["code"] or "").strip() or None if r else None
+
+
+def _gen_item_code(conn, category, series, dynasty) -> str:
+    """馆内编号：品类码-时代码-入藏年-流水号，如 ZB-MG-2026-0012。
+    品类/时代码挂在字典上（可后台改）；编号生成后不随分类修改而变化。"""
+    cat = _dict_code(conn, "category", category) or "QT"
+    era = (_dict_code(conn, "series", series)
+           or _dict_code(conn, "dynasty", dynasty) or "XX")
+    year = datetime.now().year
+    base = f"{cat}-{era}-{year}-"
+    n = conn.execute("SELECT COUNT(*) FROM item WHERE item_code LIKE ?",
+                     (base + "%",)).fetchone()[0] + 1
+    while True:
+        code = f"{base}{n:04d}"
+        if not conn.execute("SELECT 1 FROM item WHERE item_code=?",
+                            (code,)).fetchone():
+            return code
+        n += 1
+
+
 def confirm_item(item_id: int, fields: dict, confirm: bool,
                  operator: Optional[str] = None, status: Optional[str] = None,
                  location_id: Optional[int] = None) -> dict:
@@ -191,10 +219,20 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
                 fields[k] = None
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, item_code, status, location_id, bank, note_type, denomination, era, name "
+            "SELECT id, item_code, status, location_id, category, series, dynasty, "
+            "bank, note_type, denomination, era, name "
             "FROM item WHERE id=?", (item_id,)).fetchone()
         if not row:
             return {"ok": False, "error": "藏品不存在"}
+
+        # 手动改号：先校验唯一，改完留痕
+        if fields.get("item_code") and fields["item_code"] != row["item_code"]:
+            dupc = conn.execute(
+                "SELECT id FROM item WHERE item_code=? AND id<>?",
+                (fields["item_code"], item_id)).fetchone()
+            if dupc:
+                return {"ok": False,
+                        "error": f"编号 {fields['item_code']} 已被另一件藏品使用"}
 
         sets, vals = [], []
         for k, v in fields.items():
@@ -242,12 +280,22 @@ def confirm_item(item_id: int, fields: dict, confirm: bool,
                     (item_id, "位置变更",
                      f"{row['location_id'] or '无'} → {loc_id or '无'}", operator))
 
-        # 状态改为在库时也补发一物一码（批量任务/编辑页改状态都能走到）
-        item_code = row["item_code"]
+        # 状态改为在库时补发一物一码（馆内编号体系：品类码-时代码-入藏年-流水）
+        item_code = fields.get("item_code") or row["item_code"]
         if (confirm or new_status == "in_stock") and not item_code:
-            item_code = f"{ITEM_CODE_PREFIX}-{datetime.now().year}-{item_id:04d}"
+            item_code = _gen_item_code(
+                conn,
+                fields.get("category") or row["category"],
+                fields.get("series") or row["series"],
+                fields.get("dynasty") or row["dynasty"])
             sets.append("item_code=?")
             vals.append(item_code)
+        # 手动改号留痕
+        if fields.get("item_code") and fields["item_code"] != row["item_code"]:
+            conn.execute(
+                "INSERT INTO event(item_id, kind, detail, operator) VALUES(?,?,?,?)",
+                (item_id, "编号变更",
+                 f"{row['item_code'] or '（无）'} → {fields['item_code']}", operator))
 
         if sets:
             sets.append("updated_at=datetime('now','localtime')")

@@ -426,4 +426,37 @@ with TestClient(app) as c:
     check("送评字段", d.get("send_express") == "SF001" and d.get("send_fee") == 25,
           str((d.get("send_express"), d.get("send_fee"))))
 
+    # ---------- 站点自定义 ----------
+    c.post("/api/settings", json={"site_name": "泉缘博物馆", "logo_char": "泉"})
+    html = c.get("/login").text
+    check("站点自定义-标题", "泉缘博物馆" in html)
+    st = c.get("/api/settings").json()
+    check("站点自定义-读回", st["site_name"] == "泉缘博物馆"
+          and st["logo_char"] == "泉", str(st))
+
+    # ---------- 馆内编号体系：品类码-时代码-年-流水 ----------
+    check("字典编码", any(e["name"] == "纸币" and e["code"] == "ZB"
+          for e in c.get("/api/dict-all").json()))
+    n1 = c.post("/api/items", json={"fields": {
+        "category": "纸币", "series": "民国纸币", "name": "编号体系测试一"}}).json()["item_id"]
+    c.post(f"/api/items/{n1}", json={"confirm": True})
+    code1 = c.get(f"/api/items/{n1}").json()["item_code"]
+    check("编号体系-品类时代码", code1.startswith("ZB-MG-2026-"), code1)
+    n2 = c.post("/api/items", json={"fields": {
+        "category": "纸币", "series": "民国纸币", "name": "编号体系测试二"}}).json()["item_id"]
+    c.post(f"/api/items/{n2}", json={"confirm": True})
+    code2 = c.get(f"/api/items/{n2}").json()["item_code"]
+    check("编号体系-流水递增", code2.startswith("ZB-MG-2026-") and code2 != code1
+          and int(code2.split("-")[-1]) == int(code1.split("-")[-1]) + 1,
+          f"{code1} → {code2}")
+    # 证书号是藏品自身代码，作为属性展示，不承担馆内编号职能
+    c.post(f"/api/items/{n1}", json={"fields": {"cert_no": "CERT-ATTR-9"}})
+    pub = c.get(f"/api/pub/item/{code1}").json()
+    check("证书号作为属性展示", pub.get("cert_no") == "CERT-ATTR-9"
+          and "purchase_price" not in pub, str(pub.get("cert_no")))
+    # 手动改号：冲突要报错
+    r = c.post(f"/api/items/{n2}", json={"fields": {"item_code": code1}}).json()
+    check("编号冲突报错", r["ok"] is False and "已被" in r.get("error", ""),
+          str(r)[:90])
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

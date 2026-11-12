@@ -6,7 +6,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .auth import COOKIE, current_user, login_user, make_token
-from .config import COOKIE_SECURE, PUB_TOKEN
+from .config import COOKIE_SECURE, PHOTO_DIR, PUB_TOKEN
+from .models import get_setting
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -16,8 +17,15 @@ def _authed(request: Request) -> bool:
     return current_user(request) is not None
 
 
+def _site() -> dict:
+    """站点自定义信息：名称 / LOGO 印章字符 / LOGO 图片。"""
+    return {"name": get_setting("site_name", "钱币博物馆"),
+            "char": get_setting("logo_char", "泉"),
+            "img": (PHOTO_DIR / "settings" / "logo.png").exists()}
+
+
 def _ctx(request: Request, **kw) -> dict:
-    return {"user": current_user(request), **kw}
+    return {"user": current_user(request), "site": _site(), **kw}
 
 
 @router.get("/")
@@ -136,7 +144,17 @@ def pub_item_page(code: str, request: Request):
     """游客导览页（免登录，内网可访问），只展示脱敏字段。"""
     if PUB_TOKEN and request.query_params.get("t") != PUB_TOKEN:
         return RedirectResponse("/login", 303)
-    return templates.TemplateResponse(request, "pub_item.html", {"code": code})
+    return templates.TemplateResponse(request, "pub_item.html", _ctx(request, code=code))
+
+
+@router.get("/settings")
+def settings_page(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user["role"] != "admin":
+        return RedirectResponse("/items", 303)
+    return templates.TemplateResponse(request, "settings.html", _ctx(request))
 
 
 @router.get("/dict")

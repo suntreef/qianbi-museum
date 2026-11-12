@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>站点设置</h2>
+<p class="hint">左上角的馆名与 LOGO 在这里自定义。LOGO 印章字符建议 1 个汉字或表情；
+上传图片后图片优先展示（透明底 PNG 效果最好）。改动即刻全站生效。</p>
+
+<div class="card">
+  <div class="fieldrow">
+    <label>馆名（顶栏/登录页/导览页标题）
+      <input id="siteName" style="min-width:220px">
+    </label>
+    <label>LOGO 印章字符
+      <input id="logoChar" maxlength="2" style="width:90px">
+    </label>
+  </div>
+  <div class="btns">
+    <button class="primary" id="save">💾 保存</button>
+    <label class="btnlink" style="cursor:pointer">🖼 上传 LOGO 图片
+      <input type="file" accept="image/*" hidden id="logoFile">
+    </label>
+    <button class="mini" id="delLogo" style="background:#f6e3e0;color:#96453c">移除图片用印章</button>
+  </div>
+  <p class="hint" id="state"></p>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+async function j(url, opt){
+  const r = await fetch(url, opt);
+  if(r.status===401) return location='/login';
+  if(r.status===403){ alert('权限不够'); return null; }
+  return r.json();
+}
+(async () => {
+  const d = await j('/api/settings');
+  $('#siteName').value = d.site_name;
+  $('#logoChar').value = d.logo_char;
+  $('#state').textContent = d.logo_img ? '当前使用 LOGO 图片' : '当前使用印章字符';
+})();
+$('#save').onclick = async () => {
+  const d = await j('/api/settings', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({site_name: $('#siteName').value,
+                          logo_char: $('#logoChar').value})});
+  if(d && d.ok) location.reload();
+};
+$('#logoFile').onchange = async e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const fd = new FormData();
+  fd.append('file', f);
+  const d = await j('/api/settings/logo', {method:'POST', body: fd});
+  if(d && d.ok) location.reload();
+};
+$('#delLogo').onclick = async () => {
+  const d = await j('/api/settings/logo', {method:'DELETE'});
+  if(d && d.ok) location.reload();
+};
+</script>
+{% endblock %}

@@ -33,6 +33,35 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
+/* 新中式点睛：标题用衬线宋体系 */
+h1, h2, h3, .serif {
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STZhongsong",
+               "SimSun", serif;
+  letter-spacing: .5px;
+}
+
+/* ---------- 馆名与 LOGO 印章（可自定义） ---------- */
+.brand {
+  display: inline-flex; align-items: center; gap: 9px;
+  text-decoration: none; color: var(--ink);
+  font-weight: 700; font-size: 16px; letter-spacing: 1.5px;
+}
+.brand .name {
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STZhongsong",
+               "SimSun", serif;
+  white-space: nowrap;
+}
+.seal {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 9px;
+  background: #9e3f33; color: #f7f2e7;            /* 酡红印章 */
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STZhongsong",
+               "SimSun", serif;
+  font-weight: 700; font-size: 19px; line-height: 1;
+  box-shadow: var(--shadow-1);
+}
+.brand-img { width: 34px; height: 34px; border-radius: 9px;
+  object-fit: cover; box-shadow: var(--shadow-1); }
 
 /* ---------- 顶栏：去边框，淡墨导航 ---------- */
 .topbar {
@@ -43,6 +72,8 @@ body {
   backdrop-filter: blur(8px);
 }
 .topbar .logo { font-weight: 700; letter-spacing: 1px; font-size: 16px; white-space: nowrap; }
+/* 旧类名兜底（改版前的 logo span） */
+span.logo { font-family: "Noto Serif SC", "Source Han Serif SC", "SimSun", serif; }
 .topbar nav a { color: var(--brand-strong); text-decoration: none;
   margin-left: 14px; font-size: 14.5px; }
 .topbar nav a:hover { color: var(--ink); }
@@ -151,7 +182,9 @@ button.mini { padding: 5px 11px; font-size: 13px; background: var(--brand-soft);
 .item-card {
   background: var(--card); border-radius: var(--radius); overflow: hidden;
   box-shadow: var(--shadow-1); cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease;
 }
+.item-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
 .item-card:active { box-shadow: var(--shadow-2); }
 .item-card .thumb {
   display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover;

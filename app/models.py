@@ -133,6 +133,12 @@ CREATE TABLE IF NOT EXISTS event (
 );
 CREATE INDEX IF NOT EXISTS idx_event_item ON event(item_id);
 
+-- 站点设置（标题/LOGO 等自定义项）
+CREATE TABLE IF NOT EXISTS setting (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
 -- 批量识别任务：照片排队，后台线程限速逐张跑（人可以先走）
 CREATE TABLE IF NOT EXISTS batch_job (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -191,6 +197,7 @@ def init_db() -> None:
         # 平滑升级：老库补新列
         _ensure_column(conn, "item", "send_express", "TEXT")   # 送评寄出单号
         _ensure_column(conn, "item", "send_fee", "REAL")       # 送评费用
+        _ensure_column(conn, "dict_entry", "code", "TEXT")     # 品类/时代编码（编号体系用）
         try:
             conn.execute(FTS_DDL)
             FTS_OK = True
@@ -198,6 +205,20 @@ def init_db() -> None:
             FTS_OK = False
         fts_rebuild(conn)
         conn.execute("ANALYZE")   # 让查询计划器跟上数据分布
+
+
+def get_setting(key: str, default: str = "") -> str:
+    with get_conn() as conn:
+        r = conn.execute("SELECT value FROM setting WHERE key=?", (key,)).fetchone()
+    return (r["value"] if r and r["value"] is not None else "") or default
+
+
+def set_setting(key: str, value: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO setting(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value))
 
 
 def fts_rebuild(conn: sqlite3.Connection) -> None:

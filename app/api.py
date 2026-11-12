@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
+from PIL import Image as _PILImage
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
@@ -25,7 +26,7 @@ from . import models
 from .auth import COOKIE, hash_password, login_user, make_token, require_role
 from .config import BATCH_DIR, COOKIE_SECURE, PHOTO_DIR, PUB_TOKEN
 from .ingest import attach_photo, confirm_item, create_manual, ingest_label
-from .models import get_conn
+from .models import get_conn, get_setting, set_setting
 
 router = APIRouter(prefix="/api")
 
@@ -173,6 +174,7 @@ class DictPayload(BaseModel):
     name: str
     aliases: Optional[str] = None
     sort: int = 50
+    code: Optional[str] = None   # 品类/时代编码（编号体系用）
 
 
 @router.get("/dict/{dict_type}")
@@ -202,10 +204,10 @@ def add_dict(p: DictPayload, _: dict = Depends(require_admin)):
         raise HTTPException(400, "名称不能为空")
     with get_conn() as conn:
         conn.execute(
-            """INSERT INTO dict_entry(type, name, aliases, sort) VALUES(?,?,?,?)
-               ON CONFLICT(type, name) DO UPDATE
-               SET aliases=excluded.aliases, sort=excluded.sort""",
-            (p.type, p.name.strip(), p.aliases, p.sort))
+            """INSERT INTO dict_entry(type, name, aliases, sort, code) VALUES(?,?,?,?,?)
+               ON CONFLICT(type, name) DO UPDATE SET
+               aliases=excluded.aliases, sort=excluded.sort, code=excluded.code""",
+            (p.type, p.name.strip(), p.aliases, p.sort, (p.code or "").strip() or None))
     return {"ok": True}
 
 
@@ -215,8 +217,9 @@ def update_dict(entry_id: int, p: DictPayload, _: dict = Depends(require_admin))
         raise HTTPException(400, "参数不对")
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE dict_entry SET type=?, name=?, aliases=?, sort=? WHERE id=?",
-            (p.type, p.name.strip(), p.aliases, p.sort, entry_id))
+            "UPDATE dict_entry SET type=?, name=?, aliases=?, sort=?, code=? WHERE id=?",
+            (p.type, p.name.strip(), p.aliases, p.sort,
+             (p.code or "").strip() or None, entry_id))
         if cur.rowcount == 0:
             raise HTTPException(404, "条目不存在")
     return {"ok": True}
@@ -774,6 +777,56 @@ def batch_stop(job_id: int, _: dict = Depends(require_admin)):
     return {"ok": True}
 
 
+# ---------- 站点设置（标题/LOGO 自定义，仅管理员） ----------
+
+class SettingsPayload(BaseModel):
+    site_name: str = ""
+    logo_char: str = ""
+
+
+@router.get("/settings")
+def get_settings_ep(_: dict = Depends(require_admin)):
+    return {"ok": True,
+            "site_name": get_setting("site_name", "钱币博物馆"),
+            "logo_char": get_setting("logo_char", "泉"),
+            "logo_img": (PHOTO_DIR / "settings" / "logo.png").exists()}
+
+
+@router.post("/settings")
+def set_settings_ep(p: SettingsPayload, _: dict = Depends(require_admin)):
+    if p.site_name.strip():
+        set_setting("site_name", p.site_name.strip()[:30])
+    if p.logo_char.strip():
+        set_setting("logo_char", p.logo_char.strip()[:2])
+    return {"ok": True}
+
+
+@router.post("/settings/logo")
+async def upload_logo(file: UploadFile = File(...), _: dict = Depends(require_admin)):
+    data = await file.read()
+    if not data or (file.size and file.size > UPLOAD_MAX):
+        raise HTTPException(400, "空文件或图片太大")
+    try:
+        img = _PILImage.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        raise HTTPException(400, "图片无法识别")
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGBA")
+    if max(img.size) > 512:
+        img.thumbnail((512, 512))
+    d = PHOTO_DIR / "settings"
+    d.mkdir(parents=True, exist_ok=True)
+    img.save(d / "logo.png", "PNG")
+    return {"ok": True}
+
+
+@router.delete("/settings/logo")
+def delete_logo(_: dict = Depends(require_admin)):
+    (PHOTO_DIR / "settings" / "logo.png").unlink(missing_ok=True)
+    return {"ok": True}
+
+
 # ---------- 二维码生成（展签用） ----------
 
 @router.get("/qr")
@@ -791,7 +844,7 @@ def qr_image(text: str, _: dict = Depends(require_any)):
 PUB_FIELDS = ("item_code", "name", "category", "series", "dynasty", "bank",
               "note_type", "printer", "doc_type", "era", "denomination",
               "variety", "material", "year_text", "region",
-              "grade_co", "grade_raw")
+              "grade_co", "grade_raw", "cert_no")
 
 
 @router.get("/pub/item/{code}")

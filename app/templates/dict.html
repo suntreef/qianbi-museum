@@ -23,12 +23,13 @@
     <option value="material">材质</option><option value="cert_domain">证书域名</option>
   </select>
   <input id="addName" placeholder="名称（必填）" style="width:160px">
+  <input id="addCode" placeholder="编码（品类/朝代/系列）" style="width:130px">
   <input id="addAliases" placeholder="别名，逗号分隔（搜索用）" style="flex:1;min-width:160px">
   <input id="addSort" type="number" value="50" style="width:70px" title="排序">
   <button class="primary" id="addBtn">➕ 添加</button>
 </div>
 <table id="tbl">
-  <thead><tr><th>类型</th><th>名称</th><th>别名</th><th>排序</th><th></th></tr></thead>
+  <thead><tr><th>类型</th><th>名称</th><th>编码</th><th>别名</th><th>排序</th><th></th></tr></thead>
   <tbody></tbody>
 </table>
 
@@ -51,10 +52,11 @@ async function load(){
   tb.innerHTML = '';
   for(const e of all){
     if(tf && e.type !== tf) continue;
-    if(kw && !(e.name+((e.aliases)||'')).includes(kw)) continue;
+    if(kw && !(e.name+((e.aliases)||'')+(e.code||'')).includes(kw)) continue;
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${TYPE_CN[e.type]||e.type}</td>
       <td contenteditable class="ename">${e.name}</td>
+      <td contenteditable class="ecode">${e.code||''}</td>
       <td contenteditable class="ealias">${e.aliases||''}</td>
       <td contenteditable class="esort">${e.sort}</td>
       <td><button class="mini save">保存</button> <button class="mini del">删</button></td>`;
@@ -63,9 +65,10 @@ async function load(){
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({type: e.type,
           name: tr.querySelector('.ename').textContent.trim(),
+          code: tr.querySelector('.ecode').textContent.trim() || null,
           aliases: tr.querySelector('.ealias').textContent.trim() || null,
           sort: parseInt(tr.querySelector('.esort').textContent) || 50})});
-      if(d.ok) toast('已保存');
+      if(d) toast('已保存');
     };
     tr.querySelector('.del').onclick = async () => {
       if(!confirm(`删除「${e.name}」？`)) return;
@@ -89,9 +92,11 @@ $('#addBtn').onclick = async () => {
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({type: $('#addType').value,
       name: $('#addName').value.trim(),
+      code: $('#addCode').value.trim() || null,
       aliases: $('#addAliases').value.trim() || null,
       sort: parseInt($('#addSort').value) || 50})});
-  if(d.ok){ toast('已添加'); $('#addName').value=''; $('#addAliases').value=''; load(); }
+  if(d){ toast('已添加'); $('#addName').value=''; $('#addCode').value='';
+         $('#addAliases').value=''; load(); }
 };
 $('#typeFilter').onchange = load;
 $('#kw').oninput = load;
