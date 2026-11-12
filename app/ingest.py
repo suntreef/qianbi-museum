@@ -174,8 +174,10 @@ def create_manual(fields: dict) -> int:
         return item_id
 
 
+# 馆藏定位：本系统藏品永不售出（销售走独立的自动售货机体系）。
+# 藏品退出馆藏走「注销」（retired），需留痕；sold/consigned 仅作历史数据显示。
 VALID_STATUS = ["draft", "in_stock", "reviewing", "exhibited",
-                "lent", "consigned", "sold", "lost"]
+                "lent", "lost", "retired"]
 _NUMERIC_FIELDS = ("purchase_price", "est_value", "send_fee")
 
 

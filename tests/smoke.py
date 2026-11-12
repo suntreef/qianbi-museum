@@ -487,4 +487,13 @@ with TestClient(app) as c:
     d = c.get("/api/health-report").json()
     check("备份统计可见", d.get("db_backups", 0) >= 1, str(d.get("db_backups")))
 
+    # ---------- 馆藏不售出口径 ----------
+    c.post(f"/api/items/{n1}", json={"status": "sold"})
+    d = c.get(f"/api/items/{n1}").json()
+    check("馆藏不售出-sold被拒", d.get("status") != "sold", str(d.get("status")))
+    c.post(f"/api/items/{n1}", json={"status": "retired"})
+    d = c.get(f"/api/items/{n1}").json()
+    check("注销状态可用", d.get("status") == "retired", str(d.get("status")))
+    c.post(f"/api/items/{n1}", json={"status": "in_stock"})
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

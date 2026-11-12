@@ -36,8 +36,8 @@ require_staff = require_role("admin", "staff")  # 录入及以上
 require_admin = require_role("admin")           # 仅管理员
 
 STATUS_CN = {"draft": "草稿", "in_stock": "在库", "reviewing": "送评中",
-             "exhibited": "展出中", "lent": "借出", "consigned": "寄售",
-             "sold": "已售", "lost": "丢失"}
+             "exhibited": "展出中", "lent": "借出", "retired": "注销",
+             "consigned": "寄售(历史)", "sold": "已售(历史)", "lost": "丢失"}
 
 EXPORT_COLS = [
     ("item_code", "内部编号"), ("name", "名称"), ("category", "品类"),
