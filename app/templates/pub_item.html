@@ -5,32 +5,54 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>藏品导览</title>
 <style>
-  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0;
-         background: #f7f5f0; color: #2c2a26; }
-  header { background: #3a3630; color: #f5f0e6; padding: 14px 18px; font-weight: bold; }
-  main { max-width: 640px; margin: 0 auto; padding: 18px; }
-  h1 { font-size: 22px; margin: 8px 0; }
-  .photos img { width: 100%; border-radius: 12px; margin-bottom: 10px; border: 1px solid #ddd; }
-  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px;
-          overflow: hidden; margin-top: 12px; }
-  td { padding: 9px 12px; border-bottom: 1px solid #eee; font-size: 15px; }
-  td:first-child { color: #8a7a52; width: 90px; }
-  footer { text-align: center; color: #999; font-size: 12px; padding: 20px; }
-  .hint2 { color: #8a7a52; font-size: 13px; margin: 4px 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f6f3ea; color: #2c2922;
+         font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+         font-size: 15px; line-height: 1.55; }
+  header { background: rgba(246,243,234,.95); padding: 12px 18px;
+           display: flex; align-items: center; gap: 10px;
+           border-bottom: 1px solid rgba(104,94,70,.10); }
+  .seal { width: 30px; height: 30px; border-radius: 9px; background: #9e3f33;
+          color: #f7f2e7; display: flex; align-items: center; justify-content: center;
+          font-family: "Noto Serif SC","SimSun",serif; font-weight: 700; }
+  header .t { font-family: "Noto Serif SC","SimSun",serif; font-weight: 700;
+              font-size: 16px; letter-spacing: 1px; }
+  main { max-width: 620px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-family: "Noto Serif SC","Source Han Serif SC","SimSun",serif;
+       font-size: 22px; margin: 8px 0 2px; letter-spacing: .5px; }
+  .views { color: #a59d8b; font-size: 12.5px; margin-bottom: 14px; }
   .chip { display: inline-block; padding: 3px 12px; border-radius: 999px;
-    background: #f4ead0; color: #8a6c1e; font-size: 13px; font-weight: 600; }
+    background: #f4ead0; color: #8a6c1e; font-size: 12.5px; font-weight: 600;
+    margin: 0 6px 8px 0; }
+  .audio-card { background: #fffdf8; border-radius: 14px; padding: 14px;
+    box-shadow: 0 1px 2px rgba(84,74,52,.05), 0 4px 14px rgba(84,74,52,.07);
+    margin-bottom: 14px; }
+  .audio-card audio { width: 100%; }
+  .photos img { width: 100%; border-radius: 14px; margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(84,74,52,.05), 0 4px 14px rgba(84,74,52,.07);
+    display: block; cursor: zoom-in; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0;
+    background: #fffdf8; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(84,74,52,.05), 0 4px 14px rgba(84,74,52,.07);
+    margin-top: 14px; }
+  td { padding: 10px 14px; border-bottom: 1px solid rgba(104,94,70,.10);
+    font-size: 14px; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: #7d7666; width: 96px; font-size: 12.5px; }
+  .mono { font-family: "Roboto Mono", Consolas, monospace; }
+  footer { text-align: center; color: #a59d8b; font-size: 12px; padding: 24px; }
   #lightbox { position: fixed; inset: 0; background: rgba(22,20,15,.93);
     display: flex; align-items: center; justify-content: center;
     cursor: zoom-out; z-index: 99; }
-  #lightbox img { max-width: 96vw; max-height: 96vh; border-radius: 10px; }
+  #lightbox[hidden] { display: none; }
+  #lightbox img { max-width: 96vw; max-height: 96vh; border-radius: 14px; }
+  .empty { text-align: center; color: #a59d8b; padding: 60px 0; }
 </style>
 </head>
 <body>
-<header>🏛️ {{ site.name }} · 数字导览</header>
-<main id="main"><p>加载中…</p></main>
-<div id="lightbox" hidden onclick="this.hidden=true">
-  <img id="lbImg" alt="">
-</div>
+<header><span class="seal">泉</span><span class="t">{{ site.name }} · 数字导览</span></header>
+<main id="main"><p class="empty">加载中…</p></main>
+<div id="lightbox" hidden onclick="this.hidden=true"><img id="lbImg" alt=""></div>
 <footer>本页为馆内导览页，仅展示藏品公开信息</footer>
 
 <script>
@@ -46,32 +68,30 @@ fetch('/api/pub/item/' + encodeURIComponent('{{ code }}')).then(r => {
   const esc = s => String(s ?? '').replace(/[&<>"']/g,
     c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let html = `<h1>${esc(d.name)}</h1>`;
-  if(d.intro_audio) html += `<audio controls src="${esc(d.intro_audio)}" style="width:100%;margin:8px 0"></audio>
-    <p class="hint2">🎧 点击收听讲解</p>`;
-  if(d.level) html += `<p><span class="chip c-level">${esc(d.level)}</span></p>`;
+  html += `<div class="views mono">馆内编号 ${esc(d.item_code)} · ${(d.pub_views||0)} 次浏览</div>`;
+  if(d.level) html += `<span class="chip">${esc(d.level)}</span>`;
+  if(d.intro_audio) html += `<div class="audio-card">
+    <div style="font-size:12.5px;color:#7d7666;margin-bottom:6px">🎧 语音讲解（约30秒）</div>
+    <audio controls src="${esc(d.intro_audio)}"></audio></div>`;
   html += `<div class="photos">${(d.photos||[]).map(u => `<img src="${u}" loading="lazy">`).join('')}</div>
     <table>`;
   for(const [f, label] of FIELDS){
     if(!d[f]) continue;
-    html += `<tr><td>${label}</td><td>${esc(d[f])}</td></tr>`;
+    const v = f === 'item_code' ? `<span class="mono">${esc(d[f])}</span>` : esc(d[f]);
+    html += `<tr><td>${label}</td><td>${v}</td></tr>`;
   }
   html += '</table>';
   document.getElementById('main').innerHTML = html;
   document.title = d.name || '藏品导览';
-  // 照片点击放大
-  const box = document.querySelector('.photos');
-  if(box){
-    box.querySelectorAll('img').forEach(im => {
-      im.style.cursor = 'zoom-in';
-      im.onclick = () => {
-        document.getElementById('lbImg').src = im.src;
-        document.getElementById('lightbox').hidden = false;
-      };
-    });
-  }
+  document.querySelectorAll('.photos img').forEach(im => {
+    im.onclick = () => {
+      document.getElementById('lbImg').src = im.src;
+      document.getElementById('lightbox').hidden = false;
+    };
+  });
 }).catch(() => {
   document.getElementById('main').innerHTML =
-    '<p>未找到该藏品，请核对展签上的二维码。</p>';
+    '<p class="empty">未找到该藏品，请核对展签上的二维码。</p>';
 });
 </script>
 </body>

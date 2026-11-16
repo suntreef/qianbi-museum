@@ -420,11 +420,18 @@ def item_detail(item_id: int, user: dict = Depends(require_any)):
         vhist = conn.execute(
             "SELECT old_value, new_value, source, operator, created_at FROM value_history "
             "WHERE item_id=? ORDER BY id DESC LIMIT 20", (item_id,)).fetchall()
+        # 凭证附件：仅录入及以上可见（含价格信息，对只读用户隐藏）
+        atts = []
+        if user["role"] in ("admin", "staff"):
+            atts = [dict(a, url=f"/media/{a['file_path']}".replace("\\", "/")) for a in
+                    conn.execute("SELECT id, category, file_path, notes, created_at "
+                                 "FROM attachment WHERE item_id=? ORDER BY id", (item_id,))]
     out = dict(row)
     out["photos"] = [dict(p, url=f"/media/{p['file_path']}".replace("\\", "/"))
                      for p in photos]
     out["events"] = [dict(e) for e in events]
     out["value_history"] = [dict(v) for v in vhist]
+    out["attachments"] = atts
     if out.get("intro_audio"):
         out["intro_audio_url"] = f"/media/{out['intro_audio']}"
     return _strip_financial(out, user["role"])
@@ -452,6 +459,63 @@ def delete_photo(photo_id: int, _: dict = Depends(require_staff)):
         if not row:
             raise HTTPException(404, "照片不存在")
         conn.execute("DELETE FROM photo WHERE id=?", (photo_id,))
+    (PHOTO_DIR / row["file_path"]).unlink(missing_ok=True)
+    return {"ok": True}
+
+
+# ---------- 凭证附件（来源合法性留档：发票/协议/收据） ----------
+
+ATT_CATS = ("发票", "收据", "转让协议", "证书", "其他")
+
+
+@router.post("/items/{item_id}/attachments")
+async def upload_attachment(item_id: int, file: UploadFile = File(...),
+                            category: str = Form("其他"),
+                            notes: str = Form(""),
+                            user: dict = Depends(require_staff)):
+    if category not in ATT_CATS:
+        raise HTTPException(400, "凭证类型不对")
+    data = await file.read()
+    if not data or len(data) > UPLOAD_MAX:
+        raise HTTPException(400, "空文件或文件太大（限16MB）")
+    try:
+        img = _PILImage.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        raise HTTPException(400, "请上传图片格式的凭证（拍照即可）")
+    with get_conn() as conn:
+        if not conn.execute("SELECT id FROM item WHERE id=?", (item_id,)).fetchone():
+            raise HTTPException(404, "藏品不存在")
+        d = PHOTO_DIR / str(item_id)
+        d.mkdir(parents=True, exist_ok=True)
+        fname = f"att_{_dt.now():%Y%m%d_%H%M%S_%f}.jpg"[:-4] + ".jpg"
+        path = d / fname
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        if max(img.size) > 2000:
+            img.thumbnail((2000, 2000))
+        img.save(path, "JPEG", quality=85)
+        rel = f"{item_id}/{fname}".replace("\\", "/")
+        cur = conn.execute(
+            "INSERT INTO attachment(item_id, category, file_path, notes, created_by) "
+            "VALUES(?,?,?,?,?)",
+            (item_id, category, rel, notes or None, user["username"]))
+        conn.execute("INSERT INTO event(item_id, kind, detail, operator) VALUES(?,?,?,?)",
+                     (item_id, "凭证上传", f"{category}×1", user["username"]))
+        return {"ok": True, "id": cur.lastrowid, "url": f"/media/{rel}"}
+
+
+@router.delete("/attachments/{att_id}")
+def delete_attachment(att_id: int, user: dict = Depends(require_staff)):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT item_id, file_path, category FROM attachment WHERE id=?",
+            (att_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "凭证不存在")
+        conn.execute("DELETE FROM attachment WHERE id=?", (att_id,))
+        conn.execute("INSERT INTO event(item_id, kind, detail, operator) VALUES(?,?,?,?)",
+                     (row["item_id"], "凭证删除", row["category"], user["username"]))
     (PHOTO_DIR / row["file_path"]).unlink(missing_ok=True)
     return {"ok": True}
 
@@ -503,6 +567,9 @@ def stats(user: dict = Depends(require_any)):
             "draft": conn.execute(
                 "SELECT COUNT(*) FROM item WHERE status='draft'").fetchone()[0],
             "photos": conn.execute("SELECT COUNT(*) FROM photo").fetchone()[0],
+            "pub_views": conn.execute(
+                "SELECT COALESCE(SUM(pub_views),0) FROM item").fetchone()[0],
+            "attachments": conn.execute("SELECT COUNT(*) FROM attachment").fetchone()[0],
             "est_total": est_total if user["role"] == "admin" else 0,
             "by_category": group("SELECT category, COUNT(*) FROM item GROUP BY category"),
             "by_status": group("SELECT status, COUNT(*) FROM item GROUP BY status"),
@@ -559,6 +626,45 @@ def export_xlsx(request: Request, q: Optional[str] = None,
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=items.xlsx; filename*=UTF-8''{fname}"})
+
+
+# ---------- 藏品总登记账（文物行业法定账目格式，备案年检用） ----------
+
+@router.get("/export/register")
+def export_register(_: dict = Depends(require_admin)):
+    """总登记账：登记号/名称/年代/来源/现状/等级/入藏日期。
+    逐件登记、按入藏先后排序——符合博物馆藏品总登记账通行格式。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "藏品总登记账"
+    ws.append(["登记号", "名称", "品类", "年代/纪年", "发行机构/来源", "来源方式",
+               "藏品等级", "现状", "评级", "入藏日期", "备注"])
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT item_code, name, category, year_text, era,
+                      bank, doc_type, source, level, status,
+                      grade_co, grade_raw, purchase_date, created_at, notes
+               FROM item WHERE status != 'draft' ORDER BY id ASC""").fetchall()
+    for r in rows:
+        grade = " ".join(str(x) for x in (r["grade_co"], r["grade_raw"]) if x)
+        ws.append([
+            r["item_code"], r["name"], r["category"],
+            r["year_text"] or r["era"], r["bank"] or r["doc_type"],
+            r["source"], r["level"],
+            STATUS_CN.get(r["status"], r["status"]), grade,
+            r["purchase_date"] or (r["created_at"] or "")[:10],
+            r["notes"],
+        ])
+    for i, w in enumerate((16, 30, 10, 14, 16, 10, 12, 10, 14, 12, 26), start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = quote(f"藏品总登记账_{_dt.now():%Y%m%d_%H%M}.xlsx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=register.xlsx; filename*=UTF-8''{fname}"})
 
 
 # ---------- 库位（展柜→层→盒） ----------
@@ -1037,11 +1143,14 @@ def pub_item(code: str, request: Request):
                            (code.strip(),)).fetchone()
         if not row:
             raise HTTPException(404, "未找到该藏品")
+        conn.execute("UPDATE item SET pub_views = COALESCE(pub_views,0) + 1 "
+                     "WHERE id=?", (row["id"],))   # 浏览计数（运营数据）
         photos = conn.execute(
             "SELECT file_path FROM photo WHERE item_id=? ORDER BY id", (row["id"],)
         ).fetchall()
     out = {k: row[k] for k in PUB_FIELDS if row[k]}
-    out["photos"] = [f"/media/{p['file_path']}" for p in photos]
+    out["pub_views"] = row["pub_views"]
+    out["photos"] = [f"/media/{p['file_path']}".replace("\\", "/") for p in photos]
     return out
 
 

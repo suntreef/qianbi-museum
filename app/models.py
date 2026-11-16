@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS item (
     condition_st    TEXT,                       -- 保存状况：完好/轻微氧化/需处理/已修复
     intro_text      TEXT,                       -- 讲解介绍文案（AI生成可编辑，导览页展示）
     intro_audio     TEXT,                       -- 30秒讲解语音（相对路径，TTS生成）
+    pub_views       INTEGER DEFAULT 0,          -- 导览页浏览次数（运营数据）
     send_express    TEXT,
     send_fee        REAL,
     notes           TEXT,
@@ -146,6 +147,18 @@ CREATE TABLE IF NOT EXISTS setting (
     value TEXT
 );
 
+-- 凭证附件（购入凭证/转让协议/收据——来源合法性留档，仅录入及以上可见）
+CREATE TABLE IF NOT EXISTS attachment (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id    INTEGER NOT NULL REFERENCES item(id),
+    category   TEXT NOT NULL DEFAULT '其他',    -- 发票/收据/转让协议/证书/其他
+    file_path  TEXT NOT NULL,
+    notes      TEXT,
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_att_item ON attachment(item_id);
+
 -- 估值历史（每次估值变更留痕：手动/AI参考）
 CREATE TABLE IF NOT EXISTS value_history (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,6 +233,7 @@ def init_db() -> None:
                          ("intro_audio", "TEXT")):
             _ensure_column(conn, "item", col, ddl)
         _ensure_column(conn, "dict_entry", "code", "TEXT")     # 品类/时代编码（编号体系用）
+        _ensure_column(conn, "item", "pub_views", "INTEGER DEFAULT 0")  # 导览浏览数
         try:
             # FTS 结构随版本演进（字段可能增减），启动时删除重建；
             # 索引数据本来就全量来自 item 表，紧随其后的 fts_rebuild 无损补齐

@@ -55,6 +55,28 @@
   <p class="hint">「生成介绍」：配置了大模型插口时用 AI 撰写，否则按档案字段模板生成，可手改后再合成语音。语音存入档案后，游客扫展签二维码即可收听。</p>
 </div>
 
+{% if user and user.role in ('admin', 'staff') %}
+<div class="card" id="attCard">
+  <div class="card-head"><b>📎 来源凭证（合规留档：发票/协议/收据）</b>
+    <span class="hint" id="attCount"></span></div>
+  <div class="photos" id="attRow"></div>
+  <div class="fieldrow">
+    <label class="field slim"><span>凭证类型</span>
+      <select id="attCat" class="input">
+        <option>发票</option><option>收据</option><option>转让协议</option>
+        <option>证书</option><option>其他</option>
+      </select>
+    </label>
+    <label class="field"><span>说明（可选）</span>
+      <input id="attNotes" class="input" placeholder="如：2026年10月购入凭证">
+    </label>
+    <label class="shotbtn" style="flex:2 1 200px">📷 拍摄/上传凭证
+      <input type="file" accept="image/*" capture="environment" hidden id="attFile">
+    </label>
+  </div>
+</div>
+{% endif %}
+
 <h3 class="section-title">照片</h3>
 <div class="photos" id="photoRow"></div>
 <div class="fieldrow">
@@ -173,6 +195,39 @@ async function buildForm(d){
   if(d.intro_text) $('#introText').value = d.intro_text;
   if(d.intro_audio_url) $('#introAudio').src = d.intro_audio_url;
   if(d.intro_text) $('#introSrc').textContent = '已保存';
+  // 凭证附件
+  const attRow = document.getElementById('attRow');
+  if(attRow){
+    $('#attCount').textContent = d.attachments.length ? `共 ${d.attachments.length} 份` : '尚无凭证';
+    attRow.innerHTML = d.attachments.length ? '' :
+      '<span class="hint">还没有凭证——建议把购入发票、转让协议拍照留档，备案/保险/溯源都用得上</span>';
+    for(const a of d.attachments){
+      const box = document.createElement('div');
+      box.className = 'photobox';
+      box.innerHTML = `<img src="${a.url}" loading="lazy" onclick="openLightbox('${a.url}')">
+        <span class="ptag">${esc(a.category)}</span>`;
+      const del = document.createElement('button');
+      del.className = 'pdel'; del.textContent = '✕';
+      del.onclick = async () => {
+        if(!confirm('删除这份凭证？')) return;
+        await j('/api/attachments/' + a.id, {method:'DELETE'});
+        box.remove();
+      };
+      box.appendChild(del);
+      attRow.appendChild(box);
+    }
+    document.getElementById('attFile').onchange = async e => {
+      const f = e.target.files[0];
+      if(!f) return;
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('category', document.getElementById('attCat').value);
+      fd.append('notes', document.getElementById('attNotes').value);
+      const r = await j(`/api/items/${ID}/attachments`, {method:'POST', body: fd});
+      if(r && r.ok) location.reload();
+      e.target.value = '';
+    };
+  }
   // 估值历史
   const vh = document.querySelector('#vhist tbody');
   for(const v of (d.value_history || [])){

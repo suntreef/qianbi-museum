@@ -27,13 +27,14 @@
   <select class="input" id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
   <button class="btn primary" id="go">查询</button>
   {% if user and user.role == 'admin' %}
-  <a class="btn sm" href="#" id="exportBtn">⬇️ 导出Excel</a>
+  <a class="btn sm" href="#" id="exportBtn">⬇️ 导出台账</a>
+  <a class="btn sm" href="/api/export/register" download>📋 总登记账</a>
   <a class="btn sm" href="#" id="importBtn">⬆️ 导入Excel</a>
   <input type="file" id="importFile" accept=".xlsx" hidden>
   <a class="btn sm" href="/api/backup/db" download>💾 备份数据库</a>
   {% endif %}
 </section>
-<p class="hint"><a href="#" id="needPhotosLink">📷 待补拍清单</a> · <span id="total"></span></p>
+<p class="hint"><a href="#" id="needPhotosLink">待补拍清单</a> · <span id="total"></span></p>
 <section id="needPhotos" hidden></section>
 
 <!-- 手机：单列大图卡片流 -->
@@ -76,11 +77,13 @@ async function loadStats(){
      <span>在库/展出等 <b>${s.confirmed}</b></span>
      <span>草稿 <b>${s.draft}</b></span>
      <span>照片 <b>${s.photos}</b> 张</span>
-     <span>缺照片 <b>${np.count}</b> 件</span>`;
+     <span>凭证 <b>${s.attachments || 0}</b> 份</span>
+     <span>缺照片 <b>${np.count}</b> 件</span>
+     <span>导览浏览 <b>${s.pub_views || 0}</b> 次</span>`;
   if(s.est_total) bar += `<span>估值合计 <b>${Number(s.est_total).toLocaleString()}</b> 元</span>`;
   $('#statsbar').innerHTML = bar;
   const sec = $('#needPhotos'); sec.hidden = true; sec.dataset.loaded = '';
-  $('#needPhotosLink').textContent = `📷 待补拍清单（${np.count}）`;
+  $('#needPhotosLink').textContent = `待补拍清单（${np.count}）`;
   $('#needPhotosLink').onclick = (e) => {
     e.preventDefault();
     sec.hidden = !sec.hidden;

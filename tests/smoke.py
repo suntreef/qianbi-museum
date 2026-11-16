@@ -524,4 +524,37 @@ with TestClient(app) as c:
     else:
         print("[SKIP] TTS 生成（外网/微软服务不可达时降级为仅文字）:", r.status_code)
 
+    # ---------- 凭证附件 / 总登记账 / 导览浏览统计 ----------
+    r = c.post(f"/api/items/{iid}/attachments",
+               files={"file": ("receipt.jpg", buf.getvalue(), "image/jpeg")},
+               data={"category": "发票", "notes": "测试购入凭证"})
+    check("凭证上传", r.json().get("ok") is True, str(r.json())[:80])
+    d = c.get(f"/api/items/{iid}").json()
+    check("凭证详情返回", len(d.get("attachments", [])) == 1
+          and d["attachments"][0]["category"] == "发票")
+    check("凭证对只读隐藏", "attachments" in viewer.get(f"/api/items/{iid}").json()
+          and viewer.get(f"/api/items/{iid}").json()["attachments"] == [])
+    d2 = c.get(f"/api/items/{iid}").json()
+    check("凭证删除", c.delete(f"/api/attachments/{d2['attachments'][0]['id']}").json()["ok"])
+    r = c.post(f"/api/items/{iid}/attachments", files={
+        "file": ("x.jpg", b"notanimage", "image/jpeg")},
+        data={"category": "发票"})
+    check("凭证拒非图片", r.status_code == 400, str(r.status_code))
+
+    code_v = c.get(f"/api/items/{iid}").json()["item_code"]
+    c.get(f"/api/pub/item/{code_v}")
+    c.get(f"/api/pub/item/{code_v}")
+    pub = c.get(f"/api/pub/item/{code_v}").json()
+    check("导览浏览计数", pub.get("pub_views", 0) >= 3, str(pub.get("pub_views")))
+    s = c.get("/api/stats").json()
+    check("统计含浏览与凭证", "pub_views" in s and "attachments" in s,
+          f"views={s.get('pub_views')}")
+
+    r = c.get("/api/export/register")
+    check("总登记账导出", r.status_code == 200 and len(r.content) > 500,
+          f"{len(r.content)}B")
+    _wb3 = _load_wb(io.BytesIO(r.content))
+    _h3 = [c2.value for c2 in next(_wb3.active.iter_rows())]
+    check("登记账表头", _h3[:2] == ["登记号", "名称"], str(_h3[:3]))
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")
