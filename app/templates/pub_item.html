@@ -9,17 +9,21 @@
   body { margin: 0; background: #f6f3ea; color: #2c2922;
          font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
          font-size: 15px; line-height: 1.55; }
-  header { background: rgba(246,243,234,.95); padding: 12px 18px;
-           display: flex; align-items: center; gap: 10px;
-           border-bottom: 1px solid rgba(104,94,70,.10); }
-  .seal { width: 30px; height: 30px; border-radius: 9px; background: #9e3f33;
-          color: #f7f2e7; display: flex; align-items: center; justify-content: center;
+  header { background: linear-gradient(135deg, #232b28, #2e3834); color: #e8e4d8;
+           padding: 14px 18px; display: flex; align-items: center; gap: 10px; }
+  .seal { width: 32px; height: 32px; border-radius: 9px;
+          background: linear-gradient(135deg, #a8443a, #8d3a31);
+          border: 1px solid rgba(200,165,98,.5);
+          color: #f6ecd9; display: flex; align-items: center; justify-content: center;
           font-family: "Noto Serif SC","SimSun",serif; font-weight: 700; }
   header .t { font-family: "Noto Serif SC","SimSun",serif; font-weight: 700;
               font-size: 16px; letter-spacing: 1px; }
   main { max-width: 620px; margin: 0 auto; padding: 20px 16px 40px; }
   h1 { font-family: "Noto Serif SC","Source Han Serif SC","SimSun",serif;
        font-size: 22px; margin: 8px 0 2px; letter-spacing: .5px; }
+  h1::after { content: ""; display: block; width: 36px; height: 3px;
+    background: linear-gradient(90deg, #3d6b5c, #c8a562); border-radius: 2px;
+    margin-top: 7px; }
   .views { color: #a59d8b; font-size: 12.5px; margin-bottom: 14px; }
   .chip { display: inline-block; padding: 3px 12px; border-radius: 999px;
     background: #f4ead0; color: #8a6c1e; font-size: 12.5px; font-weight: 600;

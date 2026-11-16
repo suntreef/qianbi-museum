@@ -4,27 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>钱币博物馆 · 藏品入库</title>
-<link rel="stylesheet" href="/static/app.css?v=20261116b">
+<link rel="stylesheet" href="/static/app.css?v=20261117">
 <meta name="theme-color" content="#f7f4ec">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/capture">
-    {% if site.img %}<img class="brand-img" src="/media/settings/logo.png" alt="logo">
-    {% else %}<span class="seal">{{ site.char or '泉' }}</span>{% endif %}
-    <span class="name">{{ site.name }}</span>
-  </a>
-  <nav>
-    {% if user %}
-    <a href="/capture">采集</a>
-    <a href="/batch">批量</a>
-    <a href="/items">藏品</a>
-    {% if user.role in ('admin', 'staff') %}<a href="/inventory">盘点</a>{% endif %}
-    {% if user.role == 'admin' %}<a href="/locations">库位</a><a href="/checkup">体检</a><a href="/logs">日志</a><a href="/dict">字典</a><a href="/users">用户</a><a href="/settings">设置</a>{% endif %}
-    <span class="who">{{ user.username }}（{{ {'admin':'管理员','staff':'录入','viewer':'只读'}[user.role] }}）</span>
-    <a href="#" onclick="fetch('/api/logout',{method:'POST'}).finally(()=>location='/login')">退出</a>
-    {% endif %}
-  </nav>
+  <div class="topbar-inner">
+    <a class="brand" href="/capture">
+      {% if site.img %}<img class="brand-img" src="/media/settings/logo.png" alt="logo">
+      {% else %}<span class="seal">{{ site.char or '泉' }}</span>{% endif %}
+      <span class="name">{{ site.name }}</span>
+    </a>
+    <nav>
+      {% if user %}
+      <a href="/capture">采集</a>
+      <a href="/batch">批量</a>
+      <a href="/items">藏品</a>
+      {% if user.role in ('admin', 'staff') %}<a href="/inventory">盘点</a>{% endif %}
+      {% if user.role == 'admin' %}<a href="/locations">库位</a><a href="/checkup">体检</a><a href="/logs">日志</a><a href="/dict">字典</a><a href="/users">用户</a><a href="/settings">设置</a>{% endif %}
+      <span class="who">{{ {'admin':'管理员','staff':'录入','viewer':'只读'}[user.role] }} · {{ user.username }}</span>
+      <a class="out" href="#" onclick="fetch('/api/logout',{method:'POST'}).finally(()=>location='/login')">退出</a>
+      {% endif %}
+    </nav>
+  </div>
 </header>
 <main>{% block content %}{% endblock %}</main>
 </body>
