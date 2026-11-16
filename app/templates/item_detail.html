@@ -1,94 +1,89 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="detailhead">
-  <h2 id="title">藏品档案</h2>
+<div class="detailhead" style="margin-bottom:4px">
+  <h2 id="title" style="font-size:var(--fs-xl)">藏品档案</h2>
   <span class="hint" id="meta"></span>
 </div>
 <div class="card" id="formCard">
-  <div class="grid" id="grid"></div>
+  <div class="grid2" id="grid"></div>
   <div class="fieldrow">
-    <label>状态
-      <select id="status">
+    <label class="field"><span>状态</span>
+      <select id="status" class="input">
         <option value="draft">草稿</option><option value="in_stock">在库</option>
         <option value="reviewing">送评中</option><option value="exhibited">展出中</option>
         <option value="lent">借出</option><option value="lost">丢失</option>
         <option value="retired">注销（退出馆藏）</option>
       </select>
     </label>
-    <label>来源
-      <select id="source"><option value=""></option><option>购入</option><option>捐赠</option>
+    <label class="field"><span>来源</span>
+      <select id="source" class="input"><option value=""></option><option>购入</option><option>捐赠</option>
         <option>代管</option><option>交换</option><option>其他</option></select>
     </label>
-    <label>库位
-      <select id="location_id"><option value="">（未入库位）</option></select>
+    <label class="field"><span>库位</span>
+      <select id="location_id" class="input"><option value="">（未入库位）</option></select>
     </label>
     {% if user and user.role == 'admin' %}
-    <label>采购价<input id="purchase_price" type="number" step="0.01"></label>
-    <label>采购日期<input id="purchase_date" type="date"></label>
-    <label>估值<input id="est_value" type="number" step="0.01"></label>
-    <label>估值日期<input id="est_date" type="date"></label>
+    <label class="field"><span>采购价</span><input id="purchase_price" class="input num" type="number" step="0.01"></label>
+    <label class="field"><span>采购日期</span><input id="purchase_date" class="input" type="date"></label>
+    <label class="field"><span>估值</span><input id="est_value" class="input num" type="number" step="0.01"></label>
+    <label class="field"><span>估值日期</span><input id="est_date" class="input" type="date"></label>
     {% endif %}
   </div>
   <div class="btns">
-    <button class="primary" id="save">💾 保存修改</button>
-    <a class="btnlink" id="printLink" href="/items/{{ item_id }}/print" target="_blank">🖨 打印档案卡</a>
-    <a class="btnlink" href="/items/{{ item_id }}/tag" target="_blank">🏷 打印展签</a>
-    {% if user and user.role == 'admin' %}<button id="del" style="background:#a03e2d;color:#fff">🗑 删除此档案</button>{% endif %}
-    <a class="btnlink" href="/items">← 返回列表</a>
+    <button class="btn primary" id="save">💾 保存修改</button>
+    <a class="btn sm" id="printLink" href="/items/{{ item_id }}/print" target="_blank">🖨 打印档案卡</a>
+    <a class="btn sm" href="/items/{{ item_id }}/tag" target="_blank">🏷 打印展签</a>
+    {% if user and user.role == 'admin' %}<button class="btn danger" id="del">🗑 删除此档案</button>{% endif %}
+    <a class="btn sm" href="/items">← 返回列表</a>
   </div>
 </div>
 
 <div class="card" id="introCard">
   <div class="card-head"><b>🎧 讲解介绍（游客扫码可听，约30秒）</b>
     <span class="hint" id="introSrc"></span></div>
-  <textarea id="introText" rows="4" style="width:100%;border:none;border-radius:12px;
-    box-shadow:var(--shadow-1);padding:12px;font-family:inherit;font-size:15px;
-    background:#fffdf8;color:#2e2b24"></textarea>
+  <textarea id="introText" rows="4" class="input"></textarea>
   <div class="btns">
-    <button id="genIntro">✨ 生成介绍</button>
-    <select id="voice" style="padding:10px;border:none;border-radius:12px;
-      box-shadow:var(--shadow-1);font-family:inherit">
+    <button class="btn" id="genIntro">✨ 生成介绍</button>
+    <select id="voice" class="input" style="width:auto;flex:0 0 auto">
       <option value="xiaoxiao">晓晓（女声）</option>
       <option value="yunjian">云健（男声）</option>
       <option value="yunxi">云希（男声）</option>
     </select>
-    <button id="genTts">🔊 合成30秒语音</button>
+    <button class="btn primary" id="genTts">🔊 合成30秒语音</button>
   </div>
-  <audio id="introAudio" controls style="width:100%;margin-top:10px"></audio>
+  <audio id="introAudio" controls style="width:100%;margin-top:12px"></audio>
   <p class="hint">「生成介绍」：配置了大模型插口时用 AI 撰写，否则按档案字段模板生成，可手改后再合成语音。语音存入档案后，游客扫展签二维码即可收听。</p>
 </div>
 
-<h3>照片</h3>
+<h3 class="section-title">照片</h3>
 <div class="photos" id="photoRow"></div>
 <div class="fieldrow">
-  <label>补拍/追加照片
-    <select id="shotType">
+  <label class="field slim"><span>补拍/追加照片</span>
+    <select id="shotType" class="input">
       <option value="front">正面</option><option value="back">背面</option>
       <option value="edge">边齿</option><option value="detail">局部</option>
       <option value="label">标签</option><option value="holder">评级盒</option>
     </select>
   </label>
-  <label class="shotbtn" style="flex:1">📷 拍照上传
+  <label class="shotbtn" style="flex:2 1 200px">📷 拍照上传
     <input type="file" accept="image/*" capture="environment" hidden id="photoInput">
   </label>
 </div>
 
-<h3>估值历史</h3>
+<h3 class="section-title">估值历史</h3>
 <table id="vhist">
   <thead><tr><th>时间</th><th>旧值</th><th>新值</th><th>来源</th><th>经手人</th></tr></thead>
   <tbody></tbody>
 </table>
 
-<h3>操作日志</h3>
+<h3 class="section-title">操作日志</h3>
 <table id="events">
   <thead><tr><th>时间</th><th>事件</th><th>详情</th><th>经手人</th></tr></thead>
   <tbody></tbody>
 </table>
 
-<div id="lightbox" hidden onclick="this.hidden=true"
-     style="position:fixed;inset:0;background:rgba(22,20,15,.93);z-index:200;
-            display:flex;align-items:center;justify-content:center;cursor:zoom-out">
-  <img id="lbImg" style="max-width:96vw;max-height:96vh;border-radius:10px" alt="">
+<div id="lightbox" hidden onclick="this.hidden=true">
+  <img id="lbImg" alt="">
 </div>
 
 <script>
@@ -128,8 +123,11 @@ async function buildForm(d){
   const grid = $('#grid');
   for(const [f, label, dtype] of SELECTS){
     const wrap = document.createElement('label');
-    wrap.textContent = label;
+    wrap.className = 'field';
+    const cap = document.createElement('span');
+    cap.textContent = label;
     const sel = document.createElement('select');
+    sel.className = 'input';
     sel.id = 'f_' + f;
     sel.innerHTML = '<option value="">（未填）</option>';   // 空值默认，防止误存第一项
     const list = await j('/api/dict/' + dtype);
@@ -138,14 +136,19 @@ async function buildForm(d){
       op.value = o.name; op.textContent = o.name;
       sel.appendChild(op);
     }
+    wrap.appendChild(cap);
     wrap.appendChild(sel);
     grid.appendChild(wrap);
   }
   for(const [f, label] of TEXTS){
     const wrap = document.createElement('label');
-    wrap.textContent = label;
+    wrap.className = 'field';
+    const cap = document.createElement('span');
+    cap.textContent = label;
     const inp = document.createElement('input');
+    inp.className = 'input';
     inp.id = 'f_' + f;
+    wrap.appendChild(cap);
     wrap.appendChild(inp);
     grid.appendChild(wrap);
   }

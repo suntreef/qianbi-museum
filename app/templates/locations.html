@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>库位管理</h2>
-<p class="hint">库位按树形组织：展柜 → 层 → 盒。先建展柜（不选上级），再在展柜下建层和盒。
-藏品在档案页选择库位，盘点按库位核对。</p>
+<div class="page-head"><h2>库位管理</h2><p class="sub">库位按树形组织：展柜 → 层 → 盒。先建展柜（不选上级），再在展柜下建层和盒。
+藏品在档案页选择库位，盘点按库位核对。</p></div>
 <div class="filters addrow">
-  <select id="parentId"><option value="">（作为顶层，如：某展柜）</option></select>
-  <input id="name" placeholder="名称，如 一号展柜 / 第2层 / 钱币盒A" style="flex:1;min-width:180px">
-  <input id="code" placeholder="编号（可选）" style="width:110px">
-  <button class="primary" id="addBtn">➕ 添加库位</button>
+  <select class="input" id="parentId"><option value="">（作为顶层，如：某展柜）</option></select>
+  <input class="input grow" id="name" placeholder="名称，如 一号展柜 / 第2层 / 钱币盒A">
+  <input class="input" id="code" placeholder="编号（可选）" style="width:130px">
+  <button class="btn primary" id="addBtn">➕ 添加库位</button>
 </div>
 <table id="tbl">
   <thead><tr><th>名称</th><th>上级</th><th>编号</th><th>藏品数</th><th>操作</th></tr></thead>

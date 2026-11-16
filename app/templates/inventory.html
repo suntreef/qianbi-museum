@@ -1,21 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>盘点</h2>
-<p class="hint">选一个库位开始盘点：逐件输入或扫码枪扫「内部编号 / 评级编号」，
-系统实时核对在场情况。结束后给出差异报告（账有实无 / 位置不符），可一键归位。</p>
+<div class="page-head"><h2>盘点</h2><p class="sub">选一个库位开始盘点：逐件输入或扫码枪扫「内部编号 / 评级编号」，
+系统实时核对在场情况。结束后给出差异报告（账有实无 / 位置不符），可一键归位。</p></div>
 <section class="filters">
-  <select id="loc" style="flex:1"><option value="">— 选择库位（可选：全部在库藏品）—</option></select>
-  <button class="primary" id="startBtn">开始盘点</button>
+  <select class="input grow" id="loc"><option value="">— 选择库位（可选：全部在库藏品）—</option></select>
+  <button class="btn primary" id="startBtn">开始盘点</button>
 </section>
 
 <section id="session" hidden>
   <div class="statsbar" id="tally"></div>
   <div class="filters">
-    <button id="finishBtn">✅ 结束盘点，出差异报告</button>
-    <button id="resetBtn">重新开始</button>
+    <button class="btn primary" id="finishBtn">✅ 结束盘点，出差异报告</button>
+    <button class="btn" id="resetBtn">重新开始</button>
   </div>
   <div id="report"></div>
-  <h3>在场核对</h3>
+  <h3 class="section-title">在场核对</h3>
   <table id="tbl">
     <thead><tr><th>编号</th><th>名称</th><th>评级</th><th>核对结果</th></tr></thead>
     <tbody></tbody>
@@ -23,9 +22,7 @@
 </section>
 
 <nav class="fab-bar" id="scanBar" hidden>
-  <input id="scan" placeholder="输入/扫描 编号后回车" autocomplete="off"
-    style="flex:1;padding:15px 16px;font-size:17px;border:none;border-radius:14px;
-           box-shadow:var(--shadow-2);font-family:inherit">
+  <input id="scan" class="input" placeholder="输入/扫描 编号后回车" autocomplete="off">
 </nav>
 
 <script>
@@ -127,7 +124,7 @@ $('#scan').onkeydown = e => { if(e.key === 'Enter') doScan(e.target.value); };
 $('#finishBtn').onclick = () => {
   const missing = expected.filter(x => !x.state);
   const misplaced = expected.filter(x => x.state === '位置不符');
-  let html = `<div class="card"><h3>差异报告 · ${esc(locName)}</h3>
+  let html = `<div class="card"><h3 class="section-title">差异报告 · ${esc(locName)}</h3>
     <p>应到 ${expected.length} 件 · 在场 ${expected.length - missing.length - misplaced.length} 件 ·
        位置不符 ${misplaced.length} 件 · 账有实无 ${missing.length} 件</p>`;
   if(misplaced.length){
@@ -136,7 +133,7 @@ $('#finishBtn').onclick = () => {
     if(locId) html += `<button class="primary" onclick="rehome()">一键归位（把上面这些登记到本库位）</button>`;
   }
   if(missing.length){
-    html += `<p style="margin-top:10px"><b>账有实无（请现场再找一遍）：</b></p>` +
+    html += `<p style="margin-top:12px"><b>账有实无（请现场再找一遍）：</b></p>` +
       missing.map(x => `<div class="needsrow"><a href="/items/${x.id}">${esc(x.item_code)}</a> ${esc(x.name)}</div>`).join('');
   }
   html += '</div>';

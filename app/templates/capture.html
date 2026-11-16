@@ -1,45 +1,48 @@
 {% extends "base.html" %}
 {% block content %}
-<p class="hint">拍完标签出一张确认卡：核对信息 → 拍正反面 → 点「确认入库」。
-识别不出的字段先空着，管理员后台补——宁空勿错。入库成功有震动与提示音确认。</p>
+<div class="page-head">
+  <h2>采集录入</h2>
+  <p class="sub">拍完标签出一张确认卡：核对信息 → 拍正反面 → 点「确认入库」。
+  识别不出的字段先空着，管理员后台补——宁空勿错。入库成功有震动与提示音确认。</p>
+</div>
 <div id="queue"></div>
 
 <nav class="fab-bar">
-  <label class="bigbtn primary">📷 拍评级标签（可连拍）
+  <label class="btn-hero primary">📷 拍标签录入
     <input type="file" accept="image/*" capture="environment" multiple hidden id="labelInput">
   </label>
-  <button class="bigbtn" id="manualBtn">✍️ 手动录入</button>
+  <button class="btn-hero" id="manualBtn">✍️ 手动录入</button>
 </nav>
 
 <template id="cardTpl">
   <div class="card">
     <div class="card-head">
       <span class="badge"></span>
-      <span>
+      <span class="hint">
         <a class="certlink" hidden target="_blank" rel="noopener">证书页 ↗</a>
         <a class="lookuplink" hidden target="_blank" rel="noopener">手工查询 ↗</a>
       </span>
     </div>
-    <div class="grid">
-      <label>品类<select name="category"></select></label>
-      <label>系列<select name="series"></select></label>
-      <label>发行机构<select name="bank"></select></label>
-      <label>券种/类型<select name="note_type"></select></label>
-      <label>文书类型<select name="doc_type"></select></label>
-      <label>印刷厂<select name="printer"></select></label>
-      <label>朝代(古钱)<select name="dynasty"></select></label>
-      <label>评级公司<select name="grade_co"></select></label>
-      <label>分数制<select name="grade_scale"></select></label>
-      <label>来源<select name="source"></select></label>
-      <label>名称<input data-field="name"></label>
-      <label>面值<input data-field="denomination"></label>
-      <label>年号/品种<input data-field="era"></label>
-      <label>版别<input data-field="variety"></label>
-      <label>纪年<input data-field="year_text" placeholder="民国三十六年 / 光绪十八年"></label>
-      <label>地域<input data-field="region" placeholder="地契等：山西·平遥"></label>
-      <label>分数原文<input data-field="grade_raw"></label>
-      <label>冠字号<input data-field="serial_no"></label>
-      <label>备注<input data-field="notes"></label>
+    <div class="grid2">
+      <label class="field"><span>品类</span><select class="input" name="category"></select></label>
+      <label class="field"><span>系列</span><select class="input" name="series"></select></label>
+      <label class="field"><span>发行机构</span><select class="input" name="bank"></select></label>
+      <label class="field"><span>券种/类型</span><select class="input" name="note_type"></select></label>
+      <label class="field"><span>文书类型</span><select class="input" name="doc_type"></select></label>
+      <label class="field"><span>印刷厂</span><select class="input" name="printer"></select></label>
+      <label class="field"><span>朝代（古钱）</span><select class="input" name="dynasty"></select></label>
+      <label class="field"><span>评级公司</span><select class="input" name="grade_co"></select></label>
+      <label class="field"><span>分数制</span><select class="input" name="grade_scale"></select></label>
+      <label class="field"><span>来源</span><select class="input" name="source"></select></label>
+      <label class="field"><span>名称</span><input class="input" data-field="name"></label>
+      <label class="field"><span>面值</span><input class="input" data-field="denomination"></label>
+      <label class="field"><span>年号/品种</span><input class="input" data-field="era"></label>
+      <label class="field"><span>版别</span><input class="input" data-field="variety"></label>
+      <label class="field"><span>纪年</span><input class="input" data-field="year_text" placeholder="民国三十六年 / 光绪十八年"></label>
+      <label class="field"><span>地域</span><input class="input" data-field="region" placeholder="地契等：山西·平遥"></label>
+      <label class="field"><span>分数原文</span><input class="input" data-field="grade_raw"></label>
+      <label class="field"><span>冠字号</span><input class="input num" data-field="serial_no"></label>
+      <label class="field full"><span>备注</span><input class="input" data-field="notes"></label>
     </div>
     <div class="photos">
       <label class="shotbtn">📷 正面
@@ -54,8 +57,8 @@
     <div class="warn" data-warn="front" hidden></div>
     <div class="warn" data-warn="back" hidden></div>
     <div class="btns">
-      <button class="primary confirm">✅ 确认入库</button>
-      <button class="skip">⏭ 跳过</button>
+      <button class="btn primary confirm">✅ 确认入库</button>
+      <button class="btn skip">⏭ 跳过</button>
     </div>
   </div>
 </template>

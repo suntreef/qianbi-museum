@@ -1,21 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>藏品检索</h2>
+<div class="page-head"><h2>藏品检索</h2></div>
 <section class="statsbar" id="statsbar"></section>
 <section class="filters">
-  <input id="q" placeholder="搜索：名称/机构/编号/备注…（≥3字走全文索引）" style="flex:1;min-width:180px">
-  <select id="fCategory"><option value="">全部品类</option></select>
-  <select id="fSeries"><option value="">全部系列</option></select>
-  <select id="fStatus">
+  <input class="input grow" id="q" placeholder="搜索：名称/机构/编号/备注…（≥3字走全文索引）">
+  <select class="input" id="fCategory"><option value="">全部品类</option></select>
+  <select class="input" id="fSeries"><option value="">全部系列</option></select>
+  <select class="input" id="fStatus">
     <option value="">全部状态</option>
     <option value="draft">草稿</option><option value="in_stock">在库</option>
     <option value="reviewing">送评中</option><option value="exhibited">展出中</option>
     <option value="lent">借出</option><option value="lost">丢失</option>
     <option value="retired">注销</option>
   </select>
-  <input id="yFrom" type="number" placeholder="年份从" style="width:90px">
-  <input id="yTo" type="number" placeholder="到" style="width:70px">
-  <select id="fsort">
+  <input class="input num-w" id="yFrom" type="number" placeholder="年份从">
+  <input class="input num-w" id="yTo" type="number" placeholder="到">
+  <select class="input" id="fsort">
     <option value="">最新录入</option>
     <option value="old">录入先后</option>
     <option value="year">年份 ↑</option>
@@ -23,14 +23,14 @@
     <option value="value">估值 ↓</option>
     <option value="code">编号 ↑</option>
   </select>
-  <select id="fLevel"><option value="">全部等级</option></select>
-  <select id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
-  <button class="primary" id="go">查询</button>
+  <select class="input" id="fLevel"><option value="">全部等级</option></select>
+  <select class="input" id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
+  <button class="btn primary" id="go">查询</button>
   {% if user and user.role == 'admin' %}
-  <a class="btnlink" href="#" id="exportBtn">⬇️ 导出Excel</a>
-  <a class="btnlink" href="#" id="importBtn">⬆️ 导入Excel</a>
+  <a class="btn sm" href="#" id="exportBtn">⬇️ 导出Excel</a>
+  <a class="btn sm" href="#" id="importBtn">⬆️ 导入Excel</a>
   <input type="file" id="importFile" accept=".xlsx" hidden>
-  <a class="btnlink" href="/api/backup/db" download>💾 备份数据库</a>
+  <a class="btn sm" href="/api/backup/db" download>💾 备份数据库</a>
   {% endif %}
 </section>
 <p class="hint"><a href="#" id="needPhotosLink">📷 待补拍清单</a> · <span id="total"></span></p>

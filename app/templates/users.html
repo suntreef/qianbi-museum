@@ -1,17 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>用户管理</h2>
-<p class="hint">角色说明：<b>管理员</b>=全部权限（价格、导出、删除、字典、用户）；
-<b>录入</b>=拍照录入、改藏品信息（看不到价格和估值）；<b>只读</b>=仅浏览（看不到价格）。</p>
+<div class="page-head"><h2>用户管理</h2><p class="sub">角色说明：<b>管理员</b>=全部权限（价格、导出、删除、字典、用户）；
+<b>录入</b>=拍照录入、改藏品信息（看不到价格和估值）；<b>只读</b>=仅浏览（看不到价格）。</p></div>
 <div class="filters addrow">
-  <input id="username" placeholder="用户名" style="width:140px">
-  <input id="password" placeholder="初始口令" style="width:140px">
-  <select id="role">
+  <input class="input" id="username" placeholder="用户名" style="width:150px">
+  <input class="input" id="password" placeholder="初始口令" style="width:150px">
+  <select class="input" id="role">
     <option value="staff">录入</option>
     <option value="admin">管理员</option>
     <option value="viewer">只读</option>
   </select>
-  <button class="primary" id="addBtn">➕ 添加用户</button>
+  <button class="btn primary" id="addBtn">➕ 添加用户</button>
 </div>
 <table id="tbl">
   <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>

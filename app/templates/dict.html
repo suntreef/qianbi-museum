@@ -1,10 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>字典管理</h2>
-<p class="hint">机构、券种、印刷厂等下拉选项在这里维护。遇到新的评级公司、银行、印厂，加一条即可，不用改代码。
-「cert_domain」类型用于登记评级公司证书页域名（名称=域名，别名=公司名）。</p>
+<div class="page-head"><h2>字典管理</h2><p class="sub">机构、券种、印刷厂等下拉选项在这里维护。遇到新的评级公司、银行、印厂，加一条即可，不用改代码。「cert_domain」类型用于登记评级公司证书页域名（名称=域名，别名=公司名）。</p></div>
 <section class="filters">
-  <select id="typeFilter">
+  <select class="input" id="typeFilter">
     <option value="">全部类型</option>
     <option value="category">品类</option><option value="dynasty">朝代</option>
     <option value="series">时代系列</option><option value="bank">发行机构</option>
@@ -12,21 +10,21 @@
     <option value="doc_type">文书类型</option><option value="grade_co">评级公司</option>
     <option value="material">材质</option><option value="cert_domain">证书域名</option>
   </select>
-  <input id="kw" placeholder="筛选关键字" style="flex:1;min-width:140px">
+  <input class="input grow" id="kw" placeholder="筛选关键字">
 </section>
 <div class="filters addrow">
-  <select id="addType">
+  <select class="input" id="addType">
     <option value="bank">发行机构</option><option value="note_type">券种</option>
     <option value="printer">印刷厂</option><option value="doc_type">文书类型</option>
     <option value="grade_co">评级公司</option><option value="series">时代系列</option>
     <option value="dynasty">朝代</option><option value="category">品类</option>
     <option value="material">材质</option><option value="cert_domain">证书域名</option>
   </select>
-  <input id="addName" placeholder="名称（必填）" style="width:160px">
-  <input id="addCode" placeholder="编码（品类/朝代/系列）" style="width:130px">
-  <input id="addAliases" placeholder="别名，逗号分隔（搜索用）" style="flex:1;min-width:160px">
-  <input id="addSort" type="number" value="50" style="width:70px" title="排序">
-  <button class="primary" id="addBtn">➕ 添加</button>
+  <input class="input" id="addName" placeholder="名称（必填）" style="width:150px">
+  <input class="input" id="addCode" placeholder="编码（品类/朝代/系列）" style="width:150px">
+  <input class="input grow" id="addAliases" placeholder="别名，逗号分隔（搜索用）">
+  <input class="input num-w" id="addSort" type="number" value="50" title="排序">
+  <button class="btn primary" id="addBtn">➕ 添加</button>
 </div>
 <table id="tbl">
   <thead><tr><th>类型</th><th>名称</th><th>编码</th><th>别名</th><th>排序</th><th></th></tr></thead>

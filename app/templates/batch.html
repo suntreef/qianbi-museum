@@ -1,11 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>批量识别</h2>
-<p class="hint">存量录入利器：一次选 ≤60 张评级标签照片上传，关掉手机，
+<div class="page-head"><h2>批量识别</h2><p class="sub">存量录入利器：一次选 ≤60 张评级标签照片上传，关掉手机，
 NAS 后台限速慢慢识别（约 4~5 秒/张）。回来在这里看进度，
-完成后到「藏品 → 状态筛选：草稿」逐件核对入库。</p>
+完成后到「藏品 → 状态筛选：草稿」逐件核对入库。</p></div>
 <section class="filters addrow">
-  <label class="btnlink" style="flex:1;text-align:center">📷 选择照片上传（≤60张/次）
+  <label class="btn primary block" style="cursor:pointer">📷 选择照片上传（≤60张/次）
     <input type="file" accept="image/*" multiple hidden id="fileInput">
   </label>
 </section>
@@ -53,9 +52,9 @@ async function showDetail(id){
   if(!d) return;
   currentJob = id;
   $('#detailSummary').innerHTML = `任务 #${id} 明细
-    <label class="btnlink" style="cursor:pointer;margin-left:10px">➕ 追加照片（≤60张）
+    <label class="btn sm" style="cursor:pointer">➕ 追加照片（≤60张）
       <input type="file" accept="image/*" multiple hidden id="appendInput"></label>
-    <a class="btnlink" href="/items?__draft=1" style="margin-left:8px">去确认草稿</a>`;
+    <a class="btn sm" href="/items?__draft=1">去确认草稿</a>`;
   $('#items tbody').innerHTML = d.items.map(it =>
     `<tr><td>${esc(it.filename)}</td><td>${ST[it.status]||it.status}</td><td>${esc(it.message)}</td></tr>`).join('');
   const ap = document.getElementById('appendInput');
