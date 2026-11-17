@@ -1,12 +1,16 @@
 services:
   qianbi:
-    build: .
+    # NAS 拉取镜像（推荐，无需在 NAS 上构建）：
+    #   docker login ghcr.io -u suntreef -p <GitHub访问令牌>   # 私有镜像需登录一次
+    #   docker compose pull && docker compose up -d
+    # 首次部署可以只在 NAS 上放这个 docker-compose.yml 文件，不必 clone 整个仓库。
+    image: ghcr.io/suntreef/qianbi-museum:latest
     container_name: qianbi-museum
     restart: unless-stopped
     ports:
       - "8300:8000"
     volumes:
-      # 全部数据（数据库+照片）都在这个目录，备份它即可
+      # 全部数据（数据库+照片+备份）都在这个目录，备份它即可
       - ./data:/app/data
     environment:
       # 登录密码，务必修改
@@ -23,3 +27,6 @@ services:
       # 部署 HTTPS（反向代理）后设为 1，Cookie 加 Secure
       - COOKIE_SECURE=
       - TZ=Asia/Shanghai
+    # 想自己构建（不用预发布镜像）时，注释掉上面的 image 行，改用下面两行：
+    # build: .
+    # image: qianbi-museum:local

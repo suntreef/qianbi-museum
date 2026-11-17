@@ -5,25 +5,33 @@
 
 ## 部署（NAS · Docker）
 
-**方式一：拷贝文件夹（最简单，不需要 NAS 上装 git）**
+**方式一：拉取预构建镜像（推荐，一分钟部署）**
 
-1. 把整个 `qianbi-museum` 文件夹拷到 NAS（File Station 拖拽 / SMB 共享）
-2. 编辑 `docker-compose.yml`：`APP_PASSWORD` 必改；`LLM_API_KEY` 可选
-3. 打开 **Container Manager → 项目 → 新增**，指向该文件夹，构建启动
-   （或 SSH 进入该目录执行 `docker compose up -d --build`）
+镜像已由 GitHub Actions 自动构建发布（amd64 + arm64 双架构，适配 x86 与 ARM NAS）：
 
-**方式二：git 拉取（便于以后更新）**
+1. 在 NAS 上建一个目录（如 `/docker/qianbi`），放入 `docker-compose.yml`
+   （可从仓库直接下载这一个文件）
+2. 私有镜像需登录一次：`docker login ghcr.io -u suntreef -p <GitHub访问令牌>`
+   （令牌在 GitHub → Settings → Developer settings → Personal access tokens，
+   勾选 `read:packages`）
+3. 启动：
+   ```bash
+   docker compose up -d
+   ```
+4. 以后更新：`docker compose pull && docker compose up -d`
+
+**方式二：源码构建（本地化部署）**
 
 ```bash
 git clone https://github.com/suntreef/qianbi-museum.git
 cd qianbi-museum
-# 编辑 docker-compose.yml 改密码
+# 编辑 docker-compose.yml：注释 image 行、取消注释 build 行
 docker compose up -d --build
 ```
 
-以后更新：`git pull && docker compose up -d --build`
-
-启动后手机/电脑浏览器访问 `http://NAS的IP:8300`，先看 `/api/health` 确认服务正常。
+**部署后**：改 compose 里的 `APP_PASSWORD`（务必），浏览器访问
+`http://NAS的IP:8300`，先看 `/api/health` 确认服务正常。
+管理员账号 `admin`，口令即 APP_PASSWORD。
 
 ## 备份（重要）
 
