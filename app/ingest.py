@@ -46,28 +46,46 @@ def ingest_label(image_bytes: bytes) -> dict:
         qr_url = qr.decode_qr(tmp)
 
         with get_conn() as conn:
-            # ① 二维码 → 抓证书页 → 规则解析
+            # ① 二维码 → 证书页抓取 → 规则解析
             if qr_url and qr_url.startswith("http"):
+                # URL 结构本身可携带字段（PMG certlookup/{编号}/{分数}——页面有
+                # Cloudflare 时抓不到页面，URL 拦不住）
+                url_fields = rules.parse_cert_url(qr_url)
                 page = webfetch.fetch_page(qr_url)
                 if page:
                     page_html = page["html"]
                     cert_url = page["url_final"]
                     text = webfetch.extract_text(page_html)
                     fields = rules.parse_cert_page(text, cert_url)
+                    for k, v in url_fields.items():
+                        fields.setdefault(k, v)
                     parsed_from = "qr_cert"
                     conn.execute(
                         "INSERT INTO cert_fetch(item_id, adapter, url, ok, message) VALUES(?,?,?,?,?)",
                         (None, "rules", cert_url, 1, f"文本{len(text)}字"))
                 else:
+                    fields.update(url_fields)
+                    parsed_from = "qr_url" if url_fields else "none"
                     conn.execute(
                         "INSERT INTO cert_fetch(item_id, adapter, url, ok, message) VALUES(?,?,?,?,?)",
-                        (None, "rules", qr_url, 0, "抓取失败或非公网地址"))
+                        (None, "rules", qr_url, 0, "抓取失败或非公网地址"
+                         + ("，字段取自URL" if url_fields else "")))
 
-            # ② OCR 兜底（二维码读不出或页面没抓到）
-            if parsed_from == "none":
+            # ② OCR 兜底（二维码读不出或页面没抓到）；
+            #    OCR 字段优先（更具体），但 cert_no/grade 等 URL 结构化字段
+            #    不可被 OCR 的猜测值覆盖（实测：条码数字会被截断误认）
+            if parsed_from in ("none", "qr_url") or not fields:
                 ocr_text = ocr.read_text(tmp)
                 if ocr_text:
-                    fields = rules.parse_label_ocr(ocr_text)
+                    ocr_fields = rules.parse_label_ocr(ocr_text)
+                    merged = {k: v for k, v in fields.items() if v}
+                    for k, v in ocr_fields.items():
+                        if v:
+                            merged[k] = v
+                    for k in ("cert_no", "grade_raw", "grade_scale"):
+                        if fields.get(k):
+                            merged[k] = fields[k]
+                    fields = merged
                     parsed_from = "ocr_label"
 
             # ③ 评级编号重复拦截（防同一件币录两次）

@@ -1,7 +1,8 @@
 """二维码解码：从拍的照片里读出证书页 URL（本地 zxing-cpp，免费）。
 
-解码策略：原图 → 灰度 → 灰度放大2x → 顶部裁切放大3x（评级标签条通常在照片上方），
-逐个尝试，兼容拍糊、距离远、标签小的照片。
+解码策略（逐级增强，实测自 PMG/国标真实标签照片）：
+原图 → 灰度 → 放大2x → 顶部裁切3x → 右上角裁切4~6x（PMG 等评级标签的小
+二维码在右上角，直接拍常解不出，裁切放大后可解）。
 """
 from typing import Optional
 
@@ -21,11 +22,17 @@ def decode_qr(image_path) -> Optional[str]:
         with Image.open(image_path) as img:
             img.load()
             gray = img.convert("L")
+            w, h = gray.size
             variants = [img, gray]
-            big = gray.resize((gray.width * 2, gray.height * 2), Image.LANCZOS)
+            big = gray.resize((w * 2, h * 2), Image.LANCZOS)
             variants.append(big)
-            top = gray.crop((0, 0, gray.width, max(1, gray.height // 3)))
+            top = gray.crop((0, 0, w, max(1, h // 3)))
             variants.append(top.resize((top.width * 3, top.height * 3), Image.LANCZOS))
+            # 右上角裁切多倍放大（评级标签小码）
+            for frac, scale in ((0.55, 6), (0.45, 8), (0.30, 10)):
+                c = gray.crop((int(w * (1 - frac)), 0, w, max(1, int(h * 0.4))))
+                variants.append(c.resize((c.width * scale, c.height * scale),
+                                         Image.LANCZOS))
             for im in variants:
                 try:
                     results = zxingcpp.read_barcodes(im)

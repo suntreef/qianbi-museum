@@ -557,4 +557,41 @@ with TestClient(app) as c:
     _h3 = [c2.value for c2 in next(_wb3.active.iter_rows())]
     check("登记账表头", _h3[:2] == ["登记号", "名称"], str(_h3[:3]))
 
+    # ---------- 真实样本回归（2026-11-18 用户提供的三张标签照片的 OCR 文本） ----------
+    # ACG 爱藏：中央银行 1949 伍圆银元券 中华书局版·广州 62EPQ（标签无二维码，走 OCR 路径）
+    acg = ("ACG 中央银行 62 EPO 双囍号 1949年伍圆银元券中华书局版·广州地名 "
+           "AI CANG GUARANTY 冠号：1-B755211（数四北斗号） Uncireulated")
+    f = rules.parse_label_ocr(acg)
+    check("真实样本-ACG全字段", f.get("bank") == "中央银行" and f.get("note_type") == "银元券"
+          and f.get("printer") == "中华书局" and f.get("grade_raw") == "62 EPQ"
+          and f.get("denomination") == "伍圆" and f.get("year_sort") == 1949
+          and f.get("serial_no") == "1-B755211" and f.get("series") == "民国纸币",
+          str({k: f.get(k) for k in ("bank", "note_type", "grade_raw", "serial_no")}))
+    # PMG 正面：粘连 OCR（Pick#431S/M#C304-419495Cents）——宁空勿错
+    pmg_stick = ("China,Central Bank of China 53 PMG Pick#431S/M#C304-419495Cents "
+                 "PAPERMONEYGUARANTY S/N C072709-Tsingta0 AboutUneireulated")
+    f = rules.parse_label_ocr(pmg_stick)
+    check("真实样本-PMG粘连", f.get("bank") == "中央银行"
+          and f.get("catalog_ref", "").startswith("Pick# 431")
+          and f.get("serial_no") == "C072709",
+          str({k: f.get(k) for k in ("bank", "catalog_ref", "serial_no")}))
+    # PMG 清晰文本：完整解析
+    pmg_clean = ("China, Central Bank of China Pick# 431 S/M#C304-4 1949 5 Cents "
+                 "S/N C072709 - Tsingtao 53 About Uncirculated")
+    f = rules.parse_label_ocr(pmg_clean)
+    check("真实样本-PMG清晰", f.get("catalog_ref") == "Pick# 431  S/M#C304-4"
+          and f.get("denomination") == "伍分" and f.get("grade_raw") == "53"
+          and f.get("grade_scale") == "70制" and f.get("serial_no") == "C072709",
+          str({k: f.get(k) for k in ("catalog_ref", "denomination", "grade_raw")}))
+    # PMG certlookup URL：Cloudflare 拦页面，但 URL 本身含编号+分数
+    f = rules.parse_cert_url("https://www.pmgnotes.com/certlookup/2584605066/45/")
+    check("真实样本-certlookup URL", f.get("cert_no") == "2584605066"
+          and f.get("grade_raw") == "45" and f.get("grade_scale") == "70制", str(f))
+    # 二维码解码增强：右上角裁切放大（PMG 标签小码实测）
+    from app.services import qr as _qrsvc
+    _p = os.path.join(os.environ["DATA_DIR"], "pmg_qr.jpg")
+    qrcode.make("https://www.pmgnotes.com/certlookup/2584605066/45/").save(_p)
+    check("二维码-小码策略", _qrsvc.decode_qr(_p) is not None
+          and "2584605066" in _qrsvc.decode_qr(_p))
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

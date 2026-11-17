@@ -10,7 +10,7 @@ from ..models import get_conn
 
 BUILTIN_DOMAINS = {
     "cfcr.org.cn": "国标",          # NSCA 国标文物评级（实测 DZB 编号体系）
-    "pmgnotes.com": "PMG",
+    "pmgnotes.com": "PMG",   # certlookup 页面有 Cloudflare 防护——字段取自 URL（编号+分数），品种靠标签 OCR
     "pmgcert.com": "PMG",
     "notes.pmgcert.com": "PMG",
     "ngccoin.com": "NGC",
