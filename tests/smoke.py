@@ -637,4 +637,50 @@ with TestClient(app) as c:
         ing.webfetch.fetch_page = _real_fetch
         ing.ocr.read_text = _real_ocr
 
+    # ---------- 真实样本回归：保粹 CCGA / 7788 评级 / PCGS Banknote（2026-11-18） ----------
+    # 1) 保粹 CCGA：福建省银行 伍分 中华民国二十九年 65（混合字母数字编号 + 有证链 /43/198/ + 裸分数）
+    bc_ocr = ("保粹 TM 福建省银行 65 伍分中华民国二十九年 CCGA "
+              "S/NC398648-Noteguarantee B3735A3583 行銀省建福")
+    f = rules.parse_label_ocr(bc_ocr)
+    check("真实样本-保粹全字段",
+          f.get("grade_co") == "保粹" and f.get("cert_no") == "B3735A3583"
+          and f.get("bank") == "福建省银行" and f.get("series") == "民国纸币"
+          and f.get("denomination") == "伍分" and f.get("year_sort") == 1940
+          and f.get("serial_no") == "C398648" and f.get("grade_raw") == "65"
+          and f.get("grade_scale") == "70制",
+          str({k: f.get(k) for k in ("grade_co", "cert_no", "grade_raw", "denomination", "year_sort")}))
+    check("真实样本-保粹有证链URL",
+          rules.parse_cert_url("http://z.wpt.la/43/198/B3735A3583").get("cert_no") == "B3735A3583"
+          and company_for_url("https://www.youzheng.link/detailnew/43/198/B3735A3583") == "保粹")
+
+    # 2) 7788 评级：江西裕民银行 伍角 60（尾字母编号 + 特征版别 + 大东版→大东书局 + 裸分数）
+    q7_ocr = ("江西裕民银行伍角 7788 类别：纸币-民国纸币 60 年代： 民国二十二年（1933年） "
+              "规格：冠号S2761545 特征：大东版，章签，单字轨 QIQIBABA GUARANTY 70002207725F")
+    f = rules.parse_label_ocr(q7_ocr)
+    check("真实样本-7788全字段",
+          f.get("grade_co") == "7788" and f.get("cert_no") == "70002207725F"
+          and f.get("bank") == "江西裕民银行" and f.get("printer") == "大东书局"
+          and f.get("variety") == "大东版，章签，单字轨"
+          and f.get("denomination") == "伍角" and f.get("year_sort") == 1933
+          and f.get("serial_no") == "S2761545" and f.get("grade_raw") == "60",
+          str({k: f.get(k) for k in ("grade_co", "cert_no", "printer", "variety", "grade_raw")}))
+    check("真实样本-7788二维码URL",
+          rules.parse_cert_url("https://m.7788.com/new/api/Grade/productCode/c/70002207725F").get("cert_no") == "70002207725F"
+          and company_for_url("https://m.7788.com/new/api/Grade/productCode/c/70002207725F") == "7788")
+
+    # 3) PCGS Banknote：无二维码，盾牌标花纹误识 PGS/RGS，靠条码行 1147710.45/88052280 稳拿编号+分数+公司
+    pcgs_ocr = ("China / Yu Ming Bank of Kiangsi CHOICEXF PGS 45 "
+                "Pick#S1139a S/MC103-40a1934 10Cents BANKNOTE "
+                "Serial#L0325587Printer:TTBC 1147710.45/88052280 "
+                "CHOICE XF RGS Pick#S1139aS/MC103-40a 1934 10Cents")
+    f = rules.parse_label_ocr(pcgs_ocr)
+    check("真实样本-PCGS全字段",
+          f.get("grade_co") == "PCGS" and f.get("cert_no") == "88052280"
+          and f.get("grade_raw") == "CHOICE XF 45" and f.get("grade_scale") == "70制"
+          and f.get("catalog_ref") == "Pick# S1139a  S/M#C103-40a"
+          and f.get("bank") == "江西裕民银行" and f.get("printer") == "大东书局"
+          and f.get("denomination") == "壹角" and f.get("year_sort") == 1934
+          and f.get("serial_no") == "L0325587",
+          str({k: f.get(k) for k in ("grade_co", "cert_no", "grade_raw", "catalog_ref", "denomination")}))
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

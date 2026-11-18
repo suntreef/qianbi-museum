@@ -32,12 +32,24 @@ _DENOM = re.compile(
     r"|[壹贰叁肆伍陆柒捌玖拾佰仟一二三四五六七八九十]{1,6}\s*[厘文贯两]"
 )
 _YEAR = re.compile(
-    r"(民国|洪武|永乐|嘉靖|万历|顺治|康熙|雍正|乾隆|嘉庆|道光|咸丰|同治|光绪|宣统)"
+    r"((?:中华)?民国|洪武|永乐|嘉靖|万历|顺治|康熙|雍正|乾隆|嘉庆|道光|咸丰|同治|光绪|宣统)"
     r"\s*(元|\d{1,3}|[一二三四五六七八九十廿卅]+)\s*年|((?<!\d)(1[89]\d{2}|20[0-4]\d))\s*年")
+# 英文标签常不写「年」字（如 PCGS "1934 10Cents"、PMG "1949 5 Cents"）
+_EN_YEAR_BEFORE_DENOM = re.compile(
+    r"(?<![0-9A-Za-z/-])(18[5-9]\d|19\d{2}|20[0-3]\d)(?=\s*\b\d+\s*(?:Cents?|Yuan|Dollars?)\b)",
+    re.I)
 
 # ---------- 编号 ----------
-_CERT_DIGITS_TEXT = re.compile(r"(?<![A-Za-z0-9])(\d{7,12})(?![0-9])")
-_CERT_ALNUM_TEXT = re.compile(r"\b([A-Z]{1,5}\d{7,16})\b")  # 如 DZB2607050045
+_CERT_DIGITS_TEXT = re.compile(r"(?<![A-Za-z0-9./])(\d{7,12})(?![0-9./])")
+# 混合字母+数字评级编号：国标 DZB2607050045、保粹 B3735A3583、7788 70002207725F（8~18位且至少7位数字）
+_CERT_ALNUM_TEXT = re.compile(
+    r"\b((?=[A-Z0-9]{8,18}\b)(?=[A-Z0-9]*[A-Z])(?=(?:[A-Z]*\d){7})[A-Z0-9]{8,18})\b")
+# PCGS 专属条码行：{品种号}.{分数}/{证书号}，如 1147710.45/88052280
+_PCGS_BARCODE = re.compile(r"\b(\d{5,8})\.(\d{2})/(\d{7,10})\b")
+_PCGS_GRADE_PFX = re.compile(r"\b(CHOICE|GEM)\s*(UNC|BU|AU|XF|EF|VF|F|VG)\b", re.I)
+# 评级标签裸分数（如保粹 65、7788 60，不带 EPQ/UNC 后缀）：仅在确认有评级公司标识时启用
+_CO_HINT = re.compile(r"(?:评级|GUARANTY|guarantee|BANKNOTE|PCGS|PMG|NGC|CCGA|ACG|7788)", re.I)
+_SHELDON_BARE = re.compile(r"(?:^|\s)(12|15|20|25|30|35|40|45|50|53|55|58|6[0-9]|70)(?=\s|$)")
 
 # ---------- 字段标签（国内评级公司证书页通用格式） ----------
 _LABELED = [
@@ -49,20 +61,20 @@ _LABELED = [
     ("grade_raw", r"藏品分数\s*[:：]?\s*([A-Za-z0-9+\-]{1,10})"),
 ]
 
-# 目录号（Pick#/S/M#，PMG 标签标准）；OCR 常粘连（Pick#431S/M#C304-4）
-_CATALOG = re.compile(
-    r"Pick\s*#?\s*([0-9]{1,5})(?![0-9])", re.I)
+# 目录号（Pick#/S/M#，PMG/PCGS 标签标准）；支持省钞 S 前缀与小写版别后缀（Pick#S1139a）及粘连容错
+_CATALOG = re.compile(r"(?i:Pick)\s*#?\s*([A-Z]?[0-9]{1,5}[a-z]?)(?![0-9])")
 _CATALOG_SM = re.compile(
-    r"S/M\s*#?\s*([A-Z]{1,2}\s?[0-9]{1,4}(?:-[0-9](?!\d))?)", re.I)
-# 冠号：PMG S/N C072709 - Tsingtao；ACG 冠号：1-B 755211（OCR 常粘连为 1-B755211）
-_SN_PMG = re.compile(r"S/N\s*([A-Z]{0,3}\s?[0-9]{4,10})", re.I)
+    r"(?i:S/M)\s*#?\s*([A-Z]{1,2}\s?[0-9]{1,4}(?:-(?:[0-9]{1,3}[a-z]|[0-9]{1,2}(?!\d)))?)")
+# 冠号：PMG S/N C072709；PCGS Serial#L0325587Printer:TTBC；国内 冠号：1-B755211 / 冠号S2761545
+_SN_PMG = re.compile(r"(?:S/N|Serial\s*#?)\s*([A-Z]{0,3}\s?[0-9]{4,10})", re.I)
 _SN_ACG = re.compile(r"冠号\s*[：:]?\s*([A-Z]{0,3}[-—]?\s?[0-9A-Z-]{4,14})", re.I)
-# 英文面值 → 中文（PMG 标签）
+# 英文面值 → 中文（PMG/PCGS 标签；中国纸币 10/20/50 Cents 对应 壹角/贰角/伍角）
 _EN_DENOM = [
     (re.compile(r"(\d+)\s*Cents?", re.I), "分"),
     (re.compile(r"(\d+)\s*Yuan", re.I), "圆"),
     (re.compile(r"(\d+)\s*Dollars?", re.I), "圆"),
 ]
+_CENTS_JIAO = {"10": "壹角", "20": "贰角", "50": "伍角"}
 _CN_NUM_MAP = {"1": "壹", "2": "贰", "3": "叁", "5": "伍", "10": "拾",
                "20": "贰拾", "50": "伍拾", "100": "壹佰",
                "500": "伍佰", "1000": "壹仟", "2000": "贰仟", "10000": "壹万"}
@@ -85,7 +97,7 @@ def _guess_scale(raw: str) -> Optional[str]:
         return None
     if re.search(r"EPQ|PPQ", raw, re.I):
         return "70制"
-    if re.match(r"^(GEM|MS|UNC|AU|XF|EF|VF|PR|PF|SP)", raw, re.I):
+    if re.match(r"^(GEM|CHOICE|MS|UNC|AU|XF|EF|VF|PR|PF|SP)", raw, re.I):
         return "70制"
     if _CN_NUM.match(raw) and int(raw) <= 70:
         return "70制"
@@ -137,7 +149,7 @@ def parse_labeled_fields(text: str) -> dict:
 
 
 def parse_label_extras(text: str) -> dict:
-    """标签/证书文本里的目录号、冠号、英文面值提取（真实样本实测补充）。"""
+    """标签/证书文本里的目录号、冠号、版别特征、英文面值提取（真实样本实测补充）。"""
     out = {}
     m = _CATALOG.search(text)
     if m:
@@ -153,13 +165,25 @@ def parse_label_extras(text: str) -> dict:
         m = _SN_ACG.search(text)
         if m:
             out["serial_no"] = m.group(1).replace(" ", "")
+    m_yr = re.search(r"(?<!藏品)年代\s*[:：]\s*([^\s（(]{2,16})", text)
+    if m_yr:
+        out["year_text"] = m_yr.group(1)
+        g = years.to_gregorian(out["year_text"])
+        if g:
+            out["year_sort"] = g
+    m_var = re.search(r"特征\s*[:：]\s*([^\s]{2,24})", text)
+    if m_var:
+        out["variety"] = m_var.group(1).strip("，,。;；")
     for pat, unit in _EN_DENOM:
         for m in pat.finditer(text):
             n = m.group(1)
             if len(n.lstrip("0")) > 4 or int(n) > 10000:
                 continue   # OCR 粘连年份+面值的长串，宁空勿错
-            cn = _CN_NUM_MAP.get(n, n)
-            out["denomination"] = f"{cn}{unit}"
+            if unit == "分" and n in _CENTS_JIAO:
+                out["denomination"] = _CENTS_JIAO[n]
+            else:
+                cn = _CN_NUM_MAP.get(n, n)
+                out["denomination"] = f"{cn}{unit}"
             break
         if out.get("denomination"):
             break
@@ -213,7 +237,7 @@ def _norm_epq(raw_tag: str) -> str:
     return "EPQ" if t in ("EPO", "EPC") else t
 
 
-def parse_grade(text: str) -> dict:
+def parse_grade(text: str, has_company: bool = False) -> dict:
     out = {}
     m = _GRADE_70.search(text)
     if m:
@@ -243,6 +267,17 @@ def parse_grade(text: str) -> dict:
     m = _GRADE_CN_DESC.search(text)
     if m:
         out.update({"grade_raw": m.group(1), "grade_scale": "描述"})
+        return out
+    # 保粹（65）、7788（60）等纸币标签常直接印裸分数（不带 EPQ/UNC）；
+    # 仅在确认有评级公司上下文时匹配独立 Sheldon 分数，剔除面值/纪年/目录号防误判
+    if has_company or _CO_HINT.search(text):
+        cleaned = re.sub(r"(?i:Pick)\s*#?\s*[A-Z0-9a-z-]+", " ", text)
+        cleaned = re.sub(r"(?i:S/M)\s*#?\s*[A-Z0-9a-z-]+", " ", cleaned)
+        cleaned = re.sub(r"\d+\s*(?:Cents?|Yuan|Dollars?|圆|元|角|分)", " ", cleaned, flags=re.I)
+        cleaned = re.sub(r"(?:民国|光绪|宣统)\s*\d+\s*年", " ", cleaned)
+        m = _SHELDON_BARE.search(cleaned)
+        if m:
+            out.update({"grade_raw": m.group(1), "grade_scale": "70制"})
     return out
 
 
@@ -251,7 +286,9 @@ def _cert_no_from_url(url: str) -> Optional[str]:
                    url, re.I)
          or re.search(r"(?:order(?:num|no)?|num|code|bh|q)[=/#]([A-Za-z0-9]{6,20})",
                       url, re.I)
-         or re.search(r"[/?#]([A-Z]{1,5}\d{7,16})(?:[/?#&]|$)", url)
+         or re.search(
+             r"[/?#]((?=[A-Z0-9]{8,18}(?:[/?#&]|$))(?=[A-Z0-9]*[A-Z])(?=(?:[A-Z]*\d){6})[A-Z0-9]{8,18})(?:[/?#&]|$)",
+             url)
          or re.search(r"[/?#](\d{6,16})(?:[/?#&]|$)", url))
     return m.group(1) if m else None
 
@@ -269,6 +306,11 @@ def _finish(fields: dict) -> dict:
             g = years.to_gregorian(m.group(0))
             if g:
                 fields["year_sort"] = g
+        else:
+            m_en = _EN_YEAR_BEFORE_DENOM.search(text)
+            if m_en:
+                fields["year_text"] = f"{m_en.group(1)}年"
+                fields["year_sort"] = int(m_en.group(1))
     fields.pop("_text", None)
     if not fields.get("grade_raw"):
         fields.pop("grade_scale", None)
@@ -286,7 +328,7 @@ def _finish(fields: dict) -> dict:
 
 def parse_cert_url(url: str) -> dict:
     """从证书查询 URL 结构直接提取字段（页面被 Cloudflare 拦或为 SPA 空壳时，URL 拦不住）。
-    实测：PMG certlookup/{编号}/{分数}；华夏 /c/{编号}、?orderNum={编号}、有证链。"""
+    实测：PMG certlookup/{编号}/{分数}；华夏 /c/{编号}；保粹有证链 /43/198/{编号}；7788 /c/{编号}。"""
     out = {}
     if not url:
         return out
@@ -313,20 +355,31 @@ def parse_cert_page(text: str, url: str) -> dict:
     fields.update(parse_label_extras(text))
     fields.update(match_dicts(text))
     if not fields.get("grade_raw"):
-        fields.update(parse_grade(text))
+        fields.update(parse_grade(text, has_company=bool(fields.get("grade_co"))))
     return _finish(fields)
 
 
 def parse_label_ocr(text: str) -> dict:
-    """标签 OCR 文本 → 字段草稿。评级编号从字母+数字或长数字串里猜（排除纸币冠字号）。"""
+    """标签 OCR 文本 → 字段草稿。评级编号从专属条码、字母+数字或长数字串里猜（排除纸币冠字号）。"""
     fields = {"_text": text}
     fields.update(parse_labeled_fields(text))
     fields.update(parse_label_extras(text))
     fields.update(match_dicts(text))
+    # PCGS 专属条码行：{品种号}.{分数}/{证书号}（即使盾牌标 PCGS 被花纹干扰误识为 PGS/RGS 也能精准定位）
+    m_pcgs = _PCGS_BARCODE.search(text)
+    if m_pcgs and 1 <= int(m_pcgs.group(2)) <= 70:
+        fields.setdefault("cert_no", m_pcgs.group(3))
+        fields.setdefault("grade_co", "PCGS")
+        if not fields.get("grade_raw"):
+            m_pfx = _PCGS_GRADE_PFX.search(text)
+            raw_g = f"{m_pfx.group(1).upper()} {m_pfx.group(2).upper()} {m_pcgs.group(2)}" if m_pfx else m_pcgs.group(2)
+            if _EPQ.search(text):
+                raw_g += " PPQ" if "PPQ" in text.upper() else " EPQ"
+            fields.update({"grade_raw": raw_g, "grade_scale": "70制"})
     if not fields.get("grade_raw"):
-        fields.update(parse_grade(text))
+        fields.update(parse_grade(text, has_company=bool(fields.get("grade_co"))))
     if not fields.get("cert_no"):
-        cand_text = re.sub(r"(?:冠号\s*[:：]?|S/N)\s*[A-Za-z0-9\-—]+", " ", text, flags=re.I)
+        cand_text = re.sub(r"(?:冠号\s*[:：]?|S/N|Serial\s*#?)\s*[A-Za-z0-9\-—]+", " ", text, flags=re.I)
         if fields.get("serial_no"):
             cand_text = cand_text.replace(fields["serial_no"], " ")
         m = _CERT_ALNUM_TEXT.search(cand_text) or _CERT_DIGITS_TEXT.search(cand_text)

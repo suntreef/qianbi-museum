@@ -33,6 +33,7 @@ def decode_qr(image_path) -> Optional[str]:
                 c = gray.crop((int(w * (1 - frac)), 0, w, max(1, int(h * 0.4))))
                 variants.append(c.resize((c.width * scale, c.height * scale),
                                          Image.LANCZOS))
+            fallback = None
             for im in variants:
                 try:
                     results = zxingcpp.read_barcodes(im)
@@ -40,8 +41,11 @@ def decode_qr(image_path) -> Optional[str]:
                     continue
                 for r in results:
                     text = (getattr(r, "text", "") or "").strip()
-                    if text:
+                    if text.startswith(("http://", "https://")):
                         return text
+                    if text and fallback is None:
+                        fallback = text
+            return fallback
     except Exception:
         return None
     return None

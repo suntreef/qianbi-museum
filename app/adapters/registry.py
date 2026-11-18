@@ -14,13 +14,22 @@ BUILTIN_DOMAINS = {
     "pmgcert.com": "PMG",
     "notes.pmgcert.com": "PMG",
     "ngccoin.com": "NGC",
-    "pcgs.com": "PCGS",
+    "pcgs.com": "PCGS",          # Cloudflare 403；PCGS Banknote 无二维码，走条码行 Spec.Grade/CertNo 解析
+    "pcgs.com.cn": "PCGS",
     "gongbocoins.com": "公博",      # 官网证书查询 /search（2026-11 实测可达；旧域 gbca.cn 已失效）
     "huaxiapj.com": "华夏",         # /c/{编号} → querySendItem.html?orderNum={编号}（SPA 空壳，取 URL 编号 + 标签 OCR）
     "huaxiapj.net": "华夏",         # 华夏繁体查询站
     "wendepj.com": "闻德",          # 官网内证书查询（实测可达）
     "airmb.com": "爱藏",            # 证书查询 pj.airmb.com/dc/search（实测可达）
+    "7788.com": "7788",          # m.7788.com/new/api/Grade/productCode/c/{编号}（跳登录页，取 URL 编号 + 标签 OCR）
+    "997788.com": "7788",
 }
+
+# 微拍堂有证链（z.wpt.la / youzheng.link）各评级公司专属路径标识
+_WPT_CHAIN_PREFIXES = (
+    ("/218/219/", "华夏"),
+    ("/43/198/", "保粹"),
+)
 
 # 证书查询页：二维码读不出/解析失败时，给采集员一个"手工查询"直达链接
 QUERY_URLS = {
@@ -29,6 +38,8 @@ QUERY_URLS = {
     "华夏": "https://www.huaxiapj.com/querySendItem.html",
     "闻德": "http://wendepj.com",
     "爱藏": "https://pj.airmb.com/dc/search",
+    "保粹": "https://www.youzheng.link",
+    "7788": "https://m.7788.com",
     "PMG": "https://www.pmgnotes.com/PMG/cert/",
     "NGC": "https://www.ngccoin.com/certlookup/",
     "PCGS": "https://www.pcgs.com/cert",
@@ -50,11 +61,13 @@ def _host(url: str) -> Optional[str]:
 def company_for_url(url: str) -> Optional[str]:
     if not url:
         return None
-    if url.startswith(("https://z.wpt.la/218/219/", "http://z.wpt.la/218/219/")):
-        return "华夏"   # 华夏 10 位以上新号的有证链二维码前缀
     host = _host(url)
     if not host:
         return None
+    if host in ("z.wpt.la", "youzheng.link"):
+        for seg, co in _WPT_CHAIN_PREFIXES:
+            if seg in url:
+                return co
     for dom, co in BUILTIN_DOMAINS.items():
         if host == dom or host.endswith("." + dom):
             return co

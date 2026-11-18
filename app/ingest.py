@@ -53,9 +53,14 @@ def ingest_label(image_bytes: bytes) -> dict:
                 url_fields = rules.parse_cert_url(qr_url)
                 page = webfetch.fetch_page(qr_url)
                 if page:
-                    cert_url = page["url_final"]
-                    for k, v in rules.parse_cert_url(cert_url).items():
+                    final_u = page["url_final"]
+                    for k, v in rules.parse_cert_url(final_u).items():
                         url_fields.setdefault(k, v)
+                    # 若被重定向到登录跳板页（如 7788 Localstoragelogin），保留原始二维码链接更直观
+                    if ("login" in final_u.lower() or "signin" in final_u.lower()) and webfetch.is_public_url(qr_url):
+                        cert_url = qr_url
+                    else:
+                        cert_url = final_u
                     text = webfetch.extract_text(page["html"])
                     if webfetch.is_spa_shell(text):
                         # 华夏等前端 Vue 空壳页（返回 200 但全是 {{QueryResult.xxx}}）：
@@ -118,6 +123,8 @@ def ingest_label(image_bytes: bytes) -> dict:
                 gc = company_for_url(url_for_co)
                 if gc:
                     fields["grade_co"] = gc
+            elif fields.get("grade_co") == "PCGS" and fields.get("cert_no"):
+                cert_url = f"https://www.pcgs.com/banknotecert/{fields['cert_no']}"
 
             # ④ 建草稿档案
             cur = conn.execute(

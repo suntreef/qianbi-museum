@@ -103,9 +103,9 @@ def extract_text(html: str) -> str:
 
 
 def is_spa_shell(text: str) -> bool:
-    """识别纯前端动态渲染空壳页（如华夏 querySendItem.html 返回 200 但全是 {{QueryResult.xxx}}）。
+    """识别纯前端动态渲染空壳页或强制登录跳板（如华夏 {{QueryResult.xxx}}、保粹有证链空壳、7788 h5登录）。
     命中空壳时不应把模板文字和占位图当真证书页，应退回 URL 提取 + 标签 OCR。"""
-    if not text or len(text.strip()) < 6:
+    if not text or len(text.strip()) < 10:
         return True
     return len(_spa_tpl_re.findall(text)) >= 2
 
