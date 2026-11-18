@@ -159,11 +159,12 @@ with TestClient(app) as c:
     plain = os.path.join(os.environ["DATA_DIR"], "plain.jpg")
     Image.new("RGB", (400, 300), "white").save(plain)
     res3 = ing.ingest_label(open(plain, "rb").read())
-    check("流水线-未识别仍建草稿",
-          res3["ok"] and res3["parsed_from"] == "none", str(res3.get("item_id")))
+    check("流水线-纯白板不建档(归并提示)",
+          res3.get("low_quality") is True and not res3.get("item_id"),
+          str({k: res3.get(k) for k in ("low_quality", "item_id")}))
 
     # ---------- 照片 ----------
-    iid4 = res3["item_id"]
+    iid4 = c.post("/api/items", json={}).json()["item_id"]
     buf = io.BytesIO()
     Image.new("RGB", (400, 300), "red").save(buf, "JPEG")
     r = c.post(f"/api/items/{iid4}/photos",
@@ -593,6 +594,59 @@ with TestClient(app) as c:
     qrcode.make("https://www.pmgnotes.com/certlookup/2584605066/45/").save(_p)
     check("二维码-小码策略", _qrsvc.decode_qr(_p) is not None
           and "2584605066" in _qrsvc.decode_qr(_p))
+
+    # ---------- 批量样本回归（2026-11-18 第二批 24 张，覆盖 11 家公司） ----------
+    # 7788：标签背带"类别/年代/规格/特征"结构，含版别特征
+    f = rules.parse_label_ocr(
+        "江西裕民银行伍角 7788 类别：纸币-民国纸币 60 年代：民国二十二年（1933年） "
+        "规格：冠号S2761545 特征：大东版，章签，单字轨 70002207725F")
+    check("样本-7788含版别", f.get("bank") == "江西裕民银行"
+          and f.get("denomination") == "伍角" and f.get("year_sort") == 1933
+          and f.get("serial_no") == "S2761545"
+          and "大东版" in (f.get("variety") or ""), str(f.get("variety")))
+    # 闻德：宣统元年清代券（系列按机构分组推断为明清票券）
+    f = rules.parse_label_ocr(
+        "交通银行伍圆 58 闻德评级 EPQ 宣统元年（1909）广东 冠字编号：037243")
+    check("样本-闻德宣统", f.get("bank") == "交通银行"
+          and f.get("year_sort") == 1909 and f.get("series") == "明清票券"
+          and f.get("grade_raw") == "58 EPQ" and f.get("serial_no") == "037243",
+          str({k: f.get(k) for k in ("year_sort", "series", "grade_raw")}))
+    # 公博"真品"券：无分数，分数制为描述
+    f = rules.parse_label_ocr(
+        "真品 江西裕民银行 GBPM 民国 伍分 上海大东书局 1510214530 C 1143490")
+    check("样本-公博真品", f.get("bank") == "江西裕民银行"
+          and f.get("grade_raw") == "真品" and f.get("grade_scale") == "描述"
+          and f.get("denomination") == "伍分", str(f.get("grade_raw")))
+    # PCGS Banknote 英文标签：CHOICE XF 45 + Pick# S1139a
+    f = rules.parse_label_ocr(
+        "China / Yu Ming Bank of Kiangsi CHOICE XF 45 Pick # S1139a "
+        "S/M C103-40a 1934 10 Cents Serial# L0325587")
+    check("样本-PCGS英文", f.get("bank") == "江西裕民银行"
+          and f.get("grade_raw") == "CHOICE XF 45"
+          and f.get("catalog_ref", "").startswith("Pick# S1139a")
+          and f.get("denomination") == "壹角", str(f.get("grade_raw")))
+    # 国鉴 GSCA：冬奥纪念钞（2022 年份公历直读）
+    f = rules.parse_label_ocr(
+        "第24届冬奥会纪念钞贰拾圆 鉴 国鉴 69 EP （2022年） 雪上运动 冠字编号：J358082318 108539354Q")
+    check("样本-国鉴冬奥钞", f.get("denomination") == "贰拾圆"
+          and f.get("year_sort") == 2022 and f.get("serial_no") == "J358082318"
+          and f.get("grade_raw") == "69", str(f.get("grade_raw")))
+    # 人民银行早期券 → 第一套人民币 确定性推断
+    f = rules.parse_label_ocr(
+        "中国人民银行汽车壹分 68 国鉴评级 GSCA （1953年）胶印四色 冠字编号：VⅢⅡ GSCA20122283")
+    check("样本-第一套人民币推断", f.get("bank") == "中国人民银行"
+          and f.get("series") == "第一套人民币" and f.get("denomination") == "壹分"
+          and f.get("year_sort") == 1953, str(f.get("series")))
+    # 保粹正面：评级日期 20230810 不得被误当评级编号
+    f = rules.parse_label_ocr(
+        "ADCOG BCNG 保粹 20230810 公平公正谨慎负责 23081610161023110 CCGA")
+    check("样本-保粹日期不当编号", f.get("cert_no") != "20230810",
+          str(f.get("cert_no")))
+    # 中乾/国鉴 字典识别
+    f = rules.parse_label_ocr("中乾评级 评级保真 如假包赔 64 中国/东北银行 1950年伍佰圆")
+    check("样本-中乾识别", f.get("grade_co") == "中乾", str(f.get("grade_co")))
+    f = rules.parse_label_ocr("国鉴评级 北京国鉴钱币艺术品鉴定中心 GSCA 壹分")
+    check("样本-国鉴识别", f.get("grade_co") == "国鉴", str(f.get("grade_co")))
 
     # ---------- 真实样本回归：华夏评级（2026-11-18 湖南省银行 贰角 1940年 53EPQ） ----------
     hx_ocr = ("湖南省银行 EPO 53 华夏评级 贰角 1940年 HUAXIA COIN GRADING "

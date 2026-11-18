@@ -114,7 +114,7 @@ async function upload(file, url, extra){
 }
 
 async function handleLabelFiles(files){
-  let i = 0, ok = 0, dup = 0;
+  let i = 0, ok = 0, dup = 0, merged = 0, lastItemId = null;
   for(const f of files){
     i++;
     toast(`识别中 ${i}/${files.length}：` + f.name);
@@ -126,11 +126,26 @@ async function handleLabelFiles(files){
       toast(`⚠️ 重复：编号 ${d.cert_no} 已入库（${d.existing.item_code||''} ${d.existing.name||''}）`, false);
       continue;
     }
-    if(d.ok){ ok++; await addCard(d.item_id, d.fields, d); }
+    // 低质量识别（只有公司 logo 面等信息少的一面）→ 归并为上一件的补充照片
+    if(d.low_quality){
+      if(lastItemId){
+        await upload(f, `/api/items/${lastItemId}/photos`, {shot_type: 'label'});
+        merged++;
+        toast(d.hint, false);
+        continue;
+      }
+      toast('这张照片识别信息少，请先拍信息完整的一面', false);
+      continue;
+    }
+    if(d.ok){ ok++; lastItemId = d.item_id; await addCard(d.item_id, d.fields, d); }
     else toast('识别失败，请重拍或手动录入', false);
   }
-  if(files.length > 1)
-    toast(`批量识别完成：${ok} 件待确认，${dup} 件重复已拦截`, ok + dup === files.length);
+  if(files.length > 1){
+    let msg = `批量识别完成：${ok} 件待确认`;
+    if(dup) msg += `，${dup} 件重复已拦截`;
+    if(merged) msg += `，${merged} 张归并为补充照片`;
+    toast(msg, ok + dup + merged === files.length);
+  }
 }
 
 async function fillSelect(sel, options, value){

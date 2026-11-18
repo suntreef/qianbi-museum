@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from . import models
 from .adapters import rules, webfetch
-from .adapters.registry import company_for_url, lookup_url_for
+from .adapters.registry import company_for_url, is_non_cert_url, lookup_url_for
 from .config import PHOTO_DIR
 from .models import get_conn
 from .services import ocr, photos, qr, years
@@ -50,6 +50,10 @@ def ingest_label(image_bytes: bytes) -> dict:
 
         with get_conn() as conn:
             # ① 二维码 → 证书页抓取 → 规则解析
+            #    微信分享码等非证书域名直接跳过抓取（纯 OCR）
+            if qr_url and is_non_cert_url(qr_url):
+                qr_url = None
+
             if qr_url and qr_url.startswith("http"):
                 # URL 结构本身可携带字段（PMG certlookup/{编号}/{分数}、华夏 /c/{编号}——
                 # 页面有 Cloudflare 或为前端 SPA 空壳时，URL 拦不住）
@@ -173,6 +177,16 @@ def ingest_label(image_bytes: bytes) -> dict:
                              _now(), meta["file_path"], meta["phash"]))
                         ref_saved += 1
                         ref_urls.append(f"/media/{meta['file_path']}")
+
+        # 识别质量评估：实质字段极少且无编号 → 提示前端归并为上一件的补充照片
+        # （员工逐件拍正/背两张标签，第二张常只是公司 logo 面）
+        quality = sum(1 for k in ("name", "bank", "denomination", "year_text",
+                                  "grade_raw", "serial_no", "catalog_ref",
+                                  "cert_no") if fields.get(k))
+        if quality < 2 and not fields.get("cert_no"):
+            return {"ok": False, "low_quality": True,
+                    "grade_co": fields.get("grade_co"),
+                    "hint": "这张照片识别信息少，已作为上一件的补充照片保存"}
 
         lookup_url = None
         if parsed_from != "qr_cert":

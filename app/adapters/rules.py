@@ -15,7 +15,7 @@ from ..services import years
 
 # ---------- 分数 ----------
 _GRADE_70 = re.compile(
-    r"\b(GEM ?BU|MS|UNC|AU|XF|EF|VF|F|VG|G|AG|PR|PF|SP)\s*-?\s*(\d{1,2})\b", re.I)
+    r"\b((?:CHOICE\s+)?(?:GEM ?BU|MS|UNC|AU|XF|EF|VF|F|VG|G|AG|PR|PF|SP))\s*-?\s*(\d{1,2})\b", re.I)
 # 60EPQ / 62 EPO / 53 EPC（EPO/EPC 为 RapidOCR 对横排/竖排 EPQ 的常见误识）
 _GRADE_BARE_EPQ = re.compile(r"\b(\d{1,2})\s*(EPQ|EPO|EPC|PPQ)\b", re.I)
 # 华夏等标签 EPQ 竖排在大号分数右侧且上沿略高，OCR 排序后呈 "EPO 53" / "EPC 53"
@@ -266,7 +266,9 @@ def parse_grade(text: str, has_company: bool = False) -> dict:
     out = {}
     m = _GRADE_70.search(text)
     if m:
-        raw = f"{m.group(1).upper()} {m.group(2)}"
+        choice = "CHOICE " if (m.group(1) or "").upper().startswith("CHOICE") else ""
+        core = (m.group(1) or "").replace("CHOICE", "").replace("choice", "").strip()
+        raw = f"{choice}{core.upper()} {m.group(2)}"
         if _EPQ.search(text):
             raw += " EPQ"
         out.update({"grade_raw": raw, "grade_scale": "70制"})
@@ -348,6 +350,12 @@ def _finish(fields: dict) -> dict:
     # 跨清末民初机构（如交通银行、中国通商银行、四明银行）：若纪年明确为清代年号，归入「明清票券」
     if fields.get("series") == "民国纸币" and _MING_QING_ERA.search(fields.get("year_text") or ""):
         fields["series"] = "明清票券"
+    # 中国人民银行早期券（1948-1955）确定性归入第一套人民币；
+    # 1955 之后年份歧义大（二至五套/纪念钞），保持人工选择
+    if fields.get("bank") == "中国人民银行" and not fields.get("series"):
+        ys = fields.get("year_sort")
+        if ys and 1948 <= ys <= 1955:
+            fields["series"] = "第一套人民币"
     fields.pop("_text", None)
     if not fields.get("grade_raw"):
         fields.pop("grade_scale", None)
@@ -423,7 +431,10 @@ def parse_label_ocr(text: str) -> dict:
             cand_text = cand_text.replace(fields["serial_no"], " ")
         m = _CERT_ALNUM_TEXT.search(cand_text) or _CERT_DIGITS_TEXT.search(cand_text)
         if m:
-            fields["cert_no"] = m.group(1)
+            cand = m.group(1)
+            # 纯数字 8 位日期形（如 20230810 评级日期）不作编号——宁空勿错
+            if not re.fullmatch(r"20(?:1[2-9]|2[0-5])[01][0-9][0-3][0-9]", cand):
+                fields["cert_no"] = cand
     # 公博等纸币标签常直接印裸冠号（如 C 1143490，无前缀）：在已锁定纸币且排除 cert_no/Pick# 后补提
     if not fields.get("serial_no") and (fields.get("bank") or fields.get("note_type")):
         sn_cand = re.sub(r"(?i:Pick)\s*#?\s*[A-Z0-9a-z-]+", " ", text)

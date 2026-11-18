@@ -52,6 +52,19 @@ def lookup_url_for(company: Optional[str]) -> Optional[str]:
     return QUERY_URLS.get(company or "")
 
 
+# 二维码常见的非证书域名（微信分享码等）——跳过抓取，纯走 OCR
+NON_CERT_DOMAINS = ("weixin.qq.com", "mp.weixin.qq.com", "qq.com", "t.cn")
+
+
+def is_non_cert_url(url: str) -> bool:
+    if not url:
+        return False
+    host = _host(url)
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in NON_CERT_DOMAINS)
+
+
 def _host(url: str) -> Optional[str]:
     try:
         host = (urlparse(url).hostname or "").lower()
