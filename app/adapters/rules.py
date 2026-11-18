@@ -16,13 +16,21 @@ from ..services import years
 # ---------- 分数 ----------
 _GRADE_70 = re.compile(
     r"\b(GEM ?BU|MS|UNC|AU|XF|EF|VF|F|VG|G|AG|PR|PF|SP)\s*-?\s*(\d{1,2})\b", re.I)
-_GRADE_BARE_EPQ = re.compile(r"\b(\d{1,2})\s*(EPQ|EPO|PPQ)\b", re.I)  # 60EPQ（EPO=OCR 对 EPQ 误识）
+# 60EPQ / 62 EPO / 53 EPC（EPO/EPC 为 RapidOCR 对横排/竖排 EPQ 的常见误识）
+_GRADE_BARE_EPQ = re.compile(r"\b(\d{1,2})\s*(EPQ|EPO|EPC|PPQ)\b", re.I)
+# 华夏等标签 EPQ 竖排在大号分数右侧且上沿略高，OCR 排序后呈 "EPO 53" / "EPC 53"
+_GRADE_EPQ_FIRST = re.compile(r"\b(EPQ|EPO|EPC|PPQ)\s*(\d{1,2})\b", re.I)
 _GRADE_EN_DESC = re.compile(
     r"\b(\d{2})\s*(About\s*Un\w+|Uncirc\w*|Unc\w* circ\w*)", re.I)  # PMG 风格：53 About Uncirculated
 _GRADE_CN_NUM = re.compile(r"(\d{2})\s*分")
 _GRADE_CN_DESC = re.compile(r"(未使用|近未使用|极美品?|美品|上品|普品|全品)")
 _EPQ = re.compile(r"\b(EPQ|PPQ)\b")
-_DENOM = re.compile(r"[壹贰叁肆伍陆柒捌玖拾佰仟万亿0-9]{1,8}\s*[圆元]")
+# 中文面值：圆/元/角允许汉字或阿拉伯数字；「分」仅限汉字数字或 1/2/5 分，严防误吞古钱「82分」等级！
+_DENOM = re.compile(
+    r"[壹贰叁肆伍陆柒捌玖拾佰仟万亿一二三四五六七八九十0-9]{1,8}\s*[圆元角]"
+    r"|(?:[壹贰叁肆伍陆柒捌玖拾佰仟一二三四五六七八九十]{1,6}|(?<!\d)[125])\s*分(?![0-9])"
+    r"|[壹贰叁肆伍陆柒捌玖拾佰仟一二三四五六七八九十]{1,6}\s*[厘文贯两]"
+)
 _YEAR = re.compile(
     r"(民国|洪武|永乐|嘉靖|万历|顺治|康熙|雍正|乾隆|嘉庆|道光|咸丰|同治|光绪|宣统)"
     r"\s*(元|\d{1,3}|[一二三四五六七八九十廿卅]+)\s*年|((?<!\d)(1[89]\d{2}|20[0-4]\d))\s*年")
@@ -159,17 +167,20 @@ def parse_label_extras(text: str) -> dict:
 
 
 def match_dicts(text: str) -> dict:
-    """把文本与字典做匹配，返回 {bank, note_type, printer, doc_type, series?}。"""
+    """把文本与字典做匹配，返回 {bank, note_type, printer, doc_type, grade_co?, series?, category?}。"""
     out: dict = {}
     if not text:
         return out
     with get_conn() as conn:
         bank_sort = None
         for ftype, key in (("bank", "bank"), ("note_type", "note_type"),
-                           ("printer", "printer"), ("doc_type", "doc_type")):
+                           ("printer", "printer"), ("doc_type", "doc_type"),
+                           ("grade_co", "grade_co")):
             rows = conn.execute(
                 "SELECT name, aliases, sort FROM dict_entry WHERE type=? ORDER BY sort, id",
                 (ftype,)).fetchall()
+            if ftype == "grade_co":
+                rows = [r for r in rows if r["name"] != "无"]  # 防单字「无」误命中普通文本
             hit = _best_match(rows, text)
             if hit:
                 out[key] = hit["name"]
@@ -190,7 +201,16 @@ def match_dicts(text: str) -> dict:
             series = _NT_SERIES.get(out["note_type"])
         if series:
             out["series"] = series
+        if out.get("bank") or out.get("note_type") or out.get("printer"):
+            out["category"] = "纸币"
+        elif out.get("doc_type"):
+            out["category"] = "契约票证"
     return out
+
+
+def _norm_epq(raw_tag: str) -> str:
+    t = raw_tag.upper()
+    return "EPQ" if t in ("EPO", "EPC") else t
 
 
 def parse_grade(text: str) -> dict:
@@ -203,9 +223,13 @@ def parse_grade(text: str) -> dict:
         out.update({"grade_raw": raw, "grade_scale": "70制"})
         return out
     m = _GRADE_BARE_EPQ.search(text)
-    if m:
-        epq = m.group(2).upper()
-        out.update({"grade_raw": f"{m.group(1)} {'EPQ' if epq == 'EPO' else epq}",
+    if m and 1 <= int(m.group(1)) <= 70:
+        out.update({"grade_raw": f"{m.group(1)} {_norm_epq(m.group(2))}",
+                    "grade_scale": "70制"})
+        return out
+    m = _GRADE_EPQ_FIRST.search(text)
+    if m and 1 <= int(m.group(2)) <= 70:
+        out.update({"grade_raw": f"{m.group(2)} {_norm_epq(m.group(1))}",
                     "grade_scale": "70制"})
         return out
     m = _GRADE_EN_DESC.search(text)
@@ -223,10 +247,12 @@ def parse_grade(text: str) -> dict:
 
 
 def _cert_no_from_url(url: str) -> Optional[str]:
-    m = (re.search(r"(?:cert(?:ificate)?|sn|serial|number|no\.?|id)[=/#]([0-9]{4,15})",
+    m = (re.search(r"(?:cert(?:ificate)?|sn|serial|number|no\.?|id)[=/#]([0-9]{4,16})",
                    url, re.I)
-         or re.search(r"[/?#]([A-Z]{1,5}\d{7,16})(?:[/?#]|$)", url)
-         or re.search(r"[/?#](\d{6,15})(?:[/?#]|$)", url))
+         or re.search(r"(?:order(?:num|no)?|num|code|bh|q)[=/#]([A-Za-z0-9]{6,20})",
+                      url, re.I)
+         or re.search(r"[/?#]([A-Z]{1,5}\d{7,16})(?:[/?#&]|$)", url)
+         or re.search(r"[/?#](\d{6,16})(?:[/?#&]|$)", url))
     return m.group(1) if m else None
 
 
@@ -246,6 +272,9 @@ def _finish(fields: dict) -> dict:
     fields.pop("_text", None)
     if not fields.get("grade_raw"):
         fields.pop("grade_scale", None)
+    if not fields.get("category"):
+        if fields.get("catalog_ref") or re.search(r"\b(EPQ|PPQ)\b", fields.get("grade_raw") or ""):
+            fields["category"] = "纸币"
     if not fields.get("name"):
         parts = [fields.get("bank"), fields.get("note_type"),
                  fields.get("denomination"), fields.get("era")]
@@ -256,14 +285,21 @@ def _finish(fields: dict) -> dict:
 
 
 def parse_cert_url(url: str) -> dict:
-    """从证书查询 URL 结构直接提取字段（页面可能被 Cloudflare 拦，URL 拦不住）。
-    实测：PMG certlookup/{编号}/{分数}。"""
+    """从证书查询 URL 结构直接提取字段（页面被 Cloudflare 拦或为 SPA 空壳时，URL 拦不住）。
+    实测：PMG certlookup/{编号}/{分数}；华夏 /c/{编号}、?orderNum={编号}、有证链。"""
     out = {}
+    if not url:
+        return out
     m = re.search(r"certlookup/([0-9]{6,15})(?:/([0-9]{1,2}))?", url, re.I)
     if m:
         out["cert_no"] = m.group(1)
-        out["grade_raw"] = m.group(2)
-        out["grade_scale"] = "70制"
+        if m.group(2):
+            out["grade_raw"] = m.group(2)
+            out["grade_scale"] = "70制"
+        return out
+    cert_no = _cert_no_from_url(url)
+    if cert_no:
+        out["cert_no"] = cert_no
     return out
 
 
@@ -282,7 +318,7 @@ def parse_cert_page(text: str, url: str) -> dict:
 
 
 def parse_label_ocr(text: str) -> dict:
-    """标签 OCR 文本 → 字段草稿。评级编号从字母+数字或长数字串里猜。"""
+    """标签 OCR 文本 → 字段草稿。评级编号从字母+数字或长数字串里猜（排除纸币冠字号）。"""
     fields = {"_text": text}
     fields.update(parse_labeled_fields(text))
     fields.update(parse_label_extras(text))
@@ -290,7 +326,10 @@ def parse_label_ocr(text: str) -> dict:
     if not fields.get("grade_raw"):
         fields.update(parse_grade(text))
     if not fields.get("cert_no"):
-        m = _CERT_ALNUM_TEXT.search(text) or _CERT_DIGITS_TEXT.search(text)
+        cand_text = re.sub(r"(?:冠号\s*[:：]?|S/N)\s*[A-Za-z0-9\-—]+", " ", text, flags=re.I)
+        if fields.get("serial_no"):
+            cand_text = cand_text.replace(fields["serial_no"], " ")
+        m = _CERT_ALNUM_TEXT.search(cand_text) or _CERT_DIGITS_TEXT.search(cand_text)
         if m:
             fields["cert_no"] = m.group(1)
     return _finish(fields)

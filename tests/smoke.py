@@ -594,4 +594,47 @@ with TestClient(app) as c:
     check("二维码-小码策略", _qrsvc.decode_qr(_p) is not None
           and "2584605066" in _qrsvc.decode_qr(_p))
 
+    # ---------- 真实样本回归：华夏评级（2026-11-18 湖南省银行 贰角 1940年 53EPQ） ----------
+    hx_ocr = ("湖南省银行 EPO 53 华夏评级 贰角 1940年 HUAXIA COIN GRADING "
+              "7578309894 冠号：D0577901 行銀省南湖 535 P 角 可园 D0577901")
+    f = rules.parse_label_ocr(hx_ocr)
+    check("真实样本-华夏全字段",
+          f.get("category") == "纸币" and f.get("bank") == "湖南省银行"
+          and f.get("series") == "民国纸币" and f.get("grade_co") == "华夏"
+          and f.get("grade_raw") == "53 EPQ" and f.get("grade_scale") == "70制"
+          and f.get("denomination") == "贰角" and f.get("year_sort") == 1940
+          and f.get("serial_no") == "D0577901" and f.get("cert_no") == "7578309894",
+          str({k: f.get(k) for k in ("grade_co", "cert_no", "serial_no", "grade_raw", "denomination")}))
+    # 古钱「82分」分数不可被「分」面值规则误吞
+    f_coin = rules.parse_label_ocr("公博评级 乾隆通宝 82分")
+    check("面值防误吞85制分数",
+          f_coin.get("grade_raw") == "82分" and f_coin.get("grade_scale") == "85制"
+          and not f_coin.get("denomination"), str(f_coin))
+    # 华夏三套二维码 URL 结构与域名识别
+    from app.adapters.registry import company_for_url
+    check("真实样本-华夏URL提取",
+          rules.parse_cert_url("http://huaxiapj.com/c/7578309894").get("cert_no") == "7578309894"
+          and rules.parse_cert_url("https://www.huaxiapj.com/querySendItem.html?orderNum=7578309894").get("cert_no") == "7578309894"
+          and company_for_url("https://z.wpt.la/218/219/12345678901") == "华夏")
+    # 华夏 SPA 空壳页拦截回归：返回 200 但正文为 {{QueryResult.xxx}} 时必须走 OCR 且不抓占位图
+    ing.qr.decode_qr = lambda p: "http://huaxiapj.com/c/7578309894"
+    ing.webfetch.fetch_page = lambda u: {
+        "url_final": "https://www.huaxiapj.com/querySendItem.html?orderNum=7578309894",
+        "html": ("<html><body>名称 {{QueryResult.name}} 证书编号 {{PjNumber}} "
+                 "<img src='https://www.huaxiapj.com/images/test_coin_123.jpg'></body></html>")}
+    ing.ocr.read_text = lambda p: hx_ocr
+    try:
+        res_hx = ing.ingest_label(open(plain, "rb").read())
+        check("流水线-SPA空壳降级OCR且保URL编号",
+              res_hx["ok"] and res_hx["parsed_from"] == "ocr_label"
+              and res_hx["ref_photos"] == 0
+              and res_hx["fields"].get("cert_no") == "7578309894"
+              and res_hx["fields"].get("grade_co") == "华夏"
+              and res_hx["fields"].get("denomination") == "贰角",
+              str({k: res_hx.get(k) for k in ("parsed_from", "ref_photos", "cert_url")}))
+    finally:
+        ing.qr.decode_qr = _real_qr
+        ing.webfetch.fetch_page = _real_fetch
+        ing.ocr.read_text = _real_ocr
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")

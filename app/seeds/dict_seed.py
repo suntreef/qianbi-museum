@@ -165,12 +165,12 @@ SEEDS = [
     ("printer", "京华印书局", "", 16, ""),
 
     # —— 评级公司
-    ("grade_co", "PMG", "Paper Money Guaranty", 1, ""),
+    ("grade_co", "PMG", "Paper Money Guaranty, PAPERMONEYGUARANTY", 1, ""),
     ("grade_co", "公博", "GBCA, 公博评级", 2, ""),
-    ("grade_co", "爱藏", "", 3, ""),
-    ("grade_co", "华夏", "CHGX, 华夏评级", 4, ""),
+    ("grade_co", "爱藏", "ACG, AI CANG, 爱藏评级", 3, ""),
+    ("grade_co", "华夏", "CHGX, HXPJ, HUAXIA COIN GRADING, 华夏评级", 4, ""),
     ("grade_co", "闻德", "WDVAC, 闻德评级", 5, ""),
-    ("grade_co", "保粹", "TSR, 保粹评级", 6, ""),
+    ("grade_co", "保粹", "TSR, PCGA, 保粹评级", 6, ""),
     ("grade_co", "PCGS", "", 7, ""),
     ("grade_co", "NGC", "", 8, ""),
     ("grade_co", "ASG", "", 9, ""),
@@ -211,7 +211,9 @@ def load_seeds() -> int:
         for type_, name, aliases, sort, code in SEEDS:
             cur = conn.execute(
                 """INSERT INTO dict_entry(type, name, aliases, sort, code) VALUES(?,?,?,?,?)
-                   ON CONFLICT(type, name) DO UPDATE SET code = excluded.code""",
+                   ON CONFLICT(type, name) DO UPDATE SET
+                     code = excluded.code,
+                     aliases = COALESCE(NULLIF(dict_entry.aliases, ''), excluded.aliases)""",
                 (type_, name, aliases or None, sort, (code or "").strip() or None))
             changed += cur.rowcount
     return changed

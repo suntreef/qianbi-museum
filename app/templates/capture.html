@@ -86,7 +86,7 @@ const DICT_FIELDS = {category:'category', series:'series', dynasty:'dynasty',
   bank:'bank', note_type:'note_type', printer:'printer', doc_type:'doc_type',
   grade_co:'grade_co'};
 const FIXED = {grade_scale:['70制','85制','描述'], source:['购入','捐赠','代管','交换','其他']};
-const BADGE = {qr_cert:'✅ 二维码证书', ocr_label:'🔍 标签OCR', none:'⏳ 未识别'};
+const BADGE = {qr_cert:'✅ 二维码证书', qr_url:'🔗 二维码编号', ocr_label:'🔍 标签OCR', none:'⏳ 未识别'};
 const dictCache = {};
 
 async function loadDict(t){

@@ -16,7 +16,8 @@ BUILTIN_DOMAINS = {
     "ngccoin.com": "NGC",
     "pcgs.com": "PCGS",
     "gongbocoins.com": "公博",      # 官网证书查询 /search（2026-11 实测可达；旧域 gbca.cn 已失效）
-    "huaxiapj.com": "华夏",         # 证书查询 /querySendItem.html（实测可达）
+    "huaxiapj.com": "华夏",         # /c/{编号} → querySendItem.html?orderNum={编号}（SPA 空壳，取 URL 编号 + 标签 OCR）
+    "huaxiapj.net": "华夏",         # 华夏繁体查询站
     "wendepj.com": "闻德",          # 官网内证书查询（实测可达）
     "airmb.com": "爱藏",            # 证书查询 pj.airmb.com/dc/search（实测可达）
 }
@@ -49,6 +50,8 @@ def _host(url: str) -> Optional[str]:
 def company_for_url(url: str) -> Optional[str]:
     if not url:
         return None
+    if url.startswith(("https://z.wpt.la/218/219/", "http://z.wpt.la/218/219/")):
+        return "华夏"   # 华夏 10 位以上新号的有证链二维码前缀
     host = _host(url)
     if not host:
         return None

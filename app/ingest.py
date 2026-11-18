@@ -48,22 +48,36 @@ def ingest_label(image_bytes: bytes) -> dict:
         with get_conn() as conn:
             # ① 二维码 → 证书页抓取 → 规则解析
             if qr_url and qr_url.startswith("http"):
-                # URL 结构本身可携带字段（PMG certlookup/{编号}/{分数}——页面有
-                # Cloudflare 时抓不到页面，URL 拦不住）
+                # URL 结构本身可携带字段（PMG certlookup/{编号}/{分数}、华夏 /c/{编号}——
+                # 页面有 Cloudflare 或为前端 SPA 空壳时，URL 拦不住）
                 url_fields = rules.parse_cert_url(qr_url)
                 page = webfetch.fetch_page(qr_url)
                 if page:
-                    page_html = page["html"]
                     cert_url = page["url_final"]
-                    text = webfetch.extract_text(page_html)
-                    fields = rules.parse_cert_page(text, cert_url)
-                    for k, v in url_fields.items():
-                        fields.setdefault(k, v)
-                    parsed_from = "qr_cert"
-                    conn.execute(
-                        "INSERT INTO cert_fetch(item_id, adapter, url, ok, message) VALUES(?,?,?,?,?)",
-                        (None, "rules", cert_url, 1, f"文本{len(text)}字"))
+                    for k, v in rules.parse_cert_url(cert_url).items():
+                        url_fields.setdefault(k, v)
+                    text = webfetch.extract_text(page["html"])
+                    if webfetch.is_spa_shell(text):
+                        # 华夏等前端 Vue 空壳页（返回 200 但全是 {{QueryResult.xxx}}）：
+                        # 不抓空壳里的占位装饰图，退回 URL 字段 + 标签 OCR 合并
+                        fields.update(url_fields)
+                        parsed_from = "qr_url" if url_fields else "none"
+                        conn.execute(
+                            "INSERT INTO cert_fetch(item_id, adapter, url, ok, message) VALUES(?,?,?,?,?)",
+                            (None, "rules", cert_url, 0, "前端动态渲染空壳"
+                             + ("，字段取自URL" if url_fields else "")))
+                    else:
+                        page_html = page["html"]
+                        fields = rules.parse_cert_page(text, cert_url)
+                        for k, v in url_fields.items():
+                            fields.setdefault(k, v)
+                        parsed_from = "qr_cert"
+                        conn.execute(
+                            "INSERT INTO cert_fetch(item_id, adapter, url, ok, message) VALUES(?,?,?,?,?)",
+                            (None, "rules", cert_url, 1, f"文本{len(text)}字"))
                 else:
+                    if webfetch.is_public_url(qr_url):
+                        cert_url = qr_url
                     fields.update(url_fields)
                     parsed_from = "qr_url" if url_fields else "none"
                     conn.execute(
@@ -71,9 +85,9 @@ def ingest_label(image_bytes: bytes) -> dict:
                         (None, "rules", qr_url, 0, "抓取失败或非公网地址"
                          + ("，字段取自URL" if url_fields else "")))
 
-            # ② OCR 兜底（二维码读不出或页面没抓到）；
+            # ② OCR 兜底（二维码读不出、页面 403 或前端空壳）；
             #    OCR 字段优先（更具体），但 cert_no/grade 等 URL 结构化字段
-            #    不可被 OCR 的猜测值覆盖（实测：条码数字会被截断误认）
+            #    不可被 OCR 的猜测值覆盖（实测：条码数字会被截断误认、冠字号易混淆）
             if parsed_from in ("none", "qr_url") or not fields:
                 ocr_text = ocr.read_text(tmp)
                 if ocr_text:
@@ -98,9 +112,10 @@ def ingest_label(image_bytes: bytes) -> dict:
                     return {"ok": False, "dupe": True, "cert_no": cert_no,
                             "existing": dict(dup)}
 
-            # ③.5 域名台账 → 自动识别评级公司
-            if cert_url and not fields.get("grade_co"):
-                gc = company_for_url(cert_url)
+            # ③.5 域名台账 → 自动识别评级公司（URL 域名权威优先于 OCR 文本猜测）
+            url_for_co = cert_url or (qr_url if qr_url and qr_url.startswith("http") else None)
+            if url_for_co:
+                gc = company_for_url(url_for_co)
                 if gc:
                     fields["grade_co"] = gc
 
@@ -108,15 +123,15 @@ def ingest_label(image_bytes: bytes) -> dict:
             cur = conn.execute(
                 """INSERT INTO item(status, cert_no, cert_url, grade_co, grade_raw, grade_scale, name,
                     category, dynasty, bank, note_type, series, printer, doc_type,
-                    denomination, era, variety, year_text, year_sort, serial_no, notes)
-                    VALUES('draft',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    denomination, era, variety, year_text, year_sort, serial_no, catalog_ref, notes)
+                    VALUES('draft',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (fields.get("cert_no"), cert_url, fields.get("grade_co"),
                  fields.get("grade_raw"), fields.get("grade_scale"), fields.get("name"),
                  fields.get("category"), fields.get("dynasty"), fields.get("bank"),
                  fields.get("note_type"), fields.get("series"), fields.get("printer"),
                  fields.get("doc_type"), fields.get("denomination"), fields.get("era"),
                  fields.get("variety"), fields.get("year_text"), fields.get("year_sort"),
-                 fields.get("serial_no"), None))
+                 fields.get("serial_no"), fields.get("catalog_ref"), None))
             item_id = cur.lastrowid
             models.fts_sync(conn, item_id, fields)
             conn.execute(
