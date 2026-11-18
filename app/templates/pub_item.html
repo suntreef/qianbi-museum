@@ -5,59 +5,76 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>藏品导览</title>
 <style>
+  /* 数字展厅模式：曜石黑 + 暗金（公开页专属视觉） */
   * { box-sizing: border-box; }
-  body { margin: 0; background: #f6f3ea; color: #2c2922;
-         font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-         font-size: 15px; line-height: 1.55; }
-  header { background: linear-gradient(135deg, #232b28, #2e3834); color: #e8e4d8;
-           padding: 14px 18px; display: flex; align-items: center; gap: 10px; }
-  .seal { width: 32px; height: 32px; border-radius: 9px;
+  body { margin: 0; background: radial-gradient(ellipse at 50% -10%,
+         #1e2024 0%, #121316 55%, #0d0e10 100%); color: #eceae4;
+         font-family: -apple-system, "PingFang SC", "Microsoft YaHei",
+         "Noto Sans SC", sans-serif; font-size: 15px; line-height: 1.6; }
+  header { background: rgba(18, 19, 22, .82);
+           -webkit-backdrop-filter: saturate(180%) blur(20px);
+           backdrop-filter: saturate(180%) blur(20px);
+           padding: 14px 18px; display: flex; align-items: center; gap: 11px;
+           border-bottom: 1px solid rgba(200,165,98,.28);
+           position: sticky; top: 0; z-index: 10; }
+  .seal { width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
           background: linear-gradient(135deg, #a8443a, #8d3a31);
-          border: 1px solid rgba(200,165,98,.5);
+          border: 1px solid rgba(200,165,98,.55);
           color: #f6ecd9; display: flex; align-items: center; justify-content: center;
           font-family: "Noto Serif SC","SimSun",serif; font-weight: 700; }
   header .t { font-family: "Noto Serif SC","SimSun",serif; font-weight: 700;
-              font-size: 16px; letter-spacing: 1px; }
-  main { max-width: 620px; margin: 0 auto; padding: 20px 16px 40px; }
+              font-size: 16px; letter-spacing: 2px; color: #eceae4; }
+  header .t small { display: block; font-size: 11px; color: #8f8d85;
+                    letter-spacing: 3px; font-weight: 400; margin-top: 1px; }
+  main { max-width: 640px; margin: 0 auto; padding: 22px 16px 44px; }
   h1 { font-family: "Noto Serif SC","Source Han Serif SC","SimSun",serif;
-       font-size: 22px; margin: 8px 0 2px; letter-spacing: .5px; }
-  h1::after { content: ""; display: block; width: 36px; height: 3px;
-    background: linear-gradient(90deg, #3d6b5c, #c8a562); border-radius: 2px;
-    margin-top: 7px; }
-  .views { color: #a59d8b; font-size: 12.5px; margin-bottom: 14px; }
-  .chip { display: inline-block; padding: 3px 12px; border-radius: 999px;
-    background: #f4ead0; color: #8a6c1e; font-size: 12.5px; font-weight: 600;
-    margin: 0 6px 8px 0; }
-  .audio-card { background: #fffdf8; border-radius: 14px; padding: 14px;
-    box-shadow: 0 1px 2px rgba(84,74,52,.05), 0 4px 14px rgba(84,74,52,.07);
-    margin-bottom: 14px; }
+       font-size: 24px; margin: 10px 0 2px; letter-spacing: .5px; color: #f4f1e6;
+       line-height: 1.25; }
+  h1::after { content: ""; display: block; width: 44px; height: 3px;
+    background: linear-gradient(90deg, #c8a562, rgba(200,165,98,.25));
+    border-radius: 2px; margin-top: 9px; }
+  .views { color: #8f8d85; font-size: 12.5px; margin: 10px 0 16px; }
+  .mono { font-family: "Roboto Mono", Consolas, monospace; }
+  .chip { display: inline-block; padding: 4px 14px; border-radius: 999px;
+    border: 1px solid #c8a562; color: #c8a562; font-size: 12.5px;
+    font-weight: 600; margin: 0 8px 10px 0; background: rgba(200,165,98,.08); }
+  .audio-card { background: #1a1b1f; border: 1px solid rgba(200,165,98,.30);
+    border-radius: 16px; padding: 16px; margin-bottom: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .audio-card .cap { font-size: 12.5px; color: #c8a562; margin-bottom: 8px;
+    letter-spacing: 1px; }
   .audio-card audio { width: 100%; }
-  .photos img { width: 100%; border-radius: 14px; margin-bottom: 12px;
-    box-shadow: 0 1px 2px rgba(84,74,52,.05), 0 4px 14px rgba(84,74,52,.07);
-    display: block; cursor: zoom-in; }
+  .gallery { display: flex; flex-direction: column; gap: 14px; margin: 16px 0; }
+  .gallery img { width: 100%; border-radius: 16px; cursor: zoom-in;
+    border: 1px solid rgba(200,165,98,.30);
+    box-shadow: 0 10px 30px rgba(0,0,0,.55); display: block; }
   table { width: 100%; border-collapse: separate; border-spacing: 0;
-    background: #fffdf8; border-radius: 14px; overflow: hidden;
-    box-shadow: 0 1px 2px rgba(84,74,52,.05), 0 4px 14px rgba(84,74,52,.07);
-    margin-top: 14px; }
-  td { padding: 10px 14px; border-bottom: 1px solid rgba(104,94,70,.10);
+    background: #1a1b1f; border-radius: 16px; overflow: hidden;
+    border: 1px solid rgba(200,165,98,.30); margin-top: 18px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  td { padding: 11px 14px; border-bottom: 1px solid rgba(200,165,98,.14);
     font-size: 14px; }
   tr:last-child td { border-bottom: none; }
-  td:first-child { color: #7d7666; width: 96px; font-size: 12.5px; }
-  .mono { font-family: "Roboto Mono", Consolas, monospace; }
-  footer { text-align: center; color: #a59d8b; font-size: 12px; padding: 24px; }
-  #lightbox { position: fixed; inset: 0; background: rgba(22,20,15,.93);
+  td:first-child { color: #8f8d85; width: 96px; font-size: 12.5px;
+    letter-spacing: 1px; }
+  td:last-child { color: #eceae4; }
+  footer { text-align: center; color: #6f6d63; font-size: 12px; padding: 26px;
+    letter-spacing: 1px; }
+  #lightbox { position: fixed; inset: 0; background: rgba(8, 9, 10, .95);
     display: flex; align-items: center; justify-content: center;
     cursor: zoom-out; z-index: 99; }
   #lightbox[hidden] { display: none; }
-  #lightbox img { max-width: 96vw; max-height: 96vh; border-radius: 14px; }
-  .empty { text-align: center; color: #a59d8b; padding: 60px 0; }
+  #lightbox img { max-width: 96vw; max-height: 96vh; border-radius: 14px;
+    transition: transform 120ms ease-out; }
+  .empty { text-align: center; color: #8f8d85; padding: 60px 0; }
 </style>
 </head>
 <body>
-<header><span class="seal">泉</span><span class="t">{{ site.name }} · 数字导览</span></header>
+<header><span class="seal">{{ site.char or "泉" }}</span>
+  <span class="t">{{ site.name }}<small>数字展厅 · DIGITAL EXHIBITION</small></span></header>
 <main id="main"><p class="empty">加载中…</p></main>
 <div id="lightbox" hidden onclick="this.hidden=true"><img id="lbImg" alt=""></div>
-<footer>本页为馆内导览页，仅展示藏品公开信息</footer>
+<footer>本页为馆内数字展厅，仅展示藏品公开信息</footer>
 
 <script>
 const FIELDS = [["category","品类"],["series","系列"],["dynasty","朝代"],["bank","发行机构"],
@@ -75,9 +92,9 @@ fetch('/api/pub/item/' + encodeURIComponent('{{ code }}')).then(r => {
   html += `<div class="views mono">馆内编号 ${esc(d.item_code)} · ${(d.pub_views||0)} 次浏览</div>`;
   if(d.level) html += `<span class="chip">${esc(d.level)}</span>`;
   if(d.intro_audio) html += `<div class="audio-card">
-    <div style="font-size:12.5px;color:#7d7666;margin-bottom:6px">🎧 语音讲解（约30秒）</div>
+    <div class="cap">🎧 语音讲解 · 约 30 秒</div>
     <audio controls src="${esc(d.intro_audio)}"></audio></div>`;
-  html += `<div class="photos">${(d.photos||[]).map(u => `<img src="${u}" loading="lazy">`).join('')}</div>
+  html += `<div class="gallery">${(d.photos||[]).map(u => `<img src="${u}" loading="lazy">`).join('')}</div>
     <table>`;
   for(const [f, label] of FIELDS){
     if(!d[f]) continue;
@@ -87,12 +104,22 @@ fetch('/api/pub/item/' + encodeURIComponent('{{ code }}')).then(r => {
   html += '</table>';
   document.getElementById('main').innerHTML = html;
   document.title = d.name || '藏品导览';
-  document.querySelectorAll('.photos img').forEach(im => {
+  document.querySelectorAll('.gallery img').forEach(im => {
     im.onclick = () => {
-      document.getElementById('lbImg').src = im.src;
+      const lb = document.getElementById('lbImg');
+      lb.style.transform = '';
+      lb.src = im.src;
       document.getElementById('lightbox').hidden = false;
     };
   });
+  const lb = document.getElementById('lightbox'), img = document.getElementById('lbImg');
+  let scale = 1;
+  lb.addEventListener('wheel', e => {
+    e.preventDefault();
+    scale = Math.min(4, Math.max(1, scale + (e.deltaY < 0 ? .18 : -.18)));
+    img.style.transform = scale === 1 ? '' : `scale(${scale})`;
+  }, {passive: false});
+  lb.addEventListener('dblclick', () => { scale = 1; img.style.transform = ''; });
 }).catch(() => {
   document.getElementById('main').innerHTML =
     '<p class="empty">未找到该藏品，请核对展签上的二维码。</p>';

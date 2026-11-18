@@ -2,45 +2,58 @@
 {% block content %}
 <div class="page-head"><h2>藏品检索</h2></div>
 <section class="statsbar" id="statsbar"></section>
-<section class="filters">
-  <input class="input grow" id="q" placeholder="搜索：名称/机构/编号/备注…（≥3字走全文索引）">
-  <select class="input" id="fCategory"><option value="">全部品类</option></select>
-  <select class="input" id="fSeries"><option value="">全部系列</option></select>
-  <select class="input" id="fStatus">
-    <option value="">全部状态</option>
-    <option value="draft">草稿</option><option value="in_stock">在库</option>
-    <option value="reviewing">送评中</option><option value="exhibited">展出中</option>
-    <option value="lent">借出</option><option value="lost">丢失</option>
-    <option value="retired">注销</option>
-  </select>
-  <input class="input num-w" id="yFrom" type="number" placeholder="年份从">
-  <input class="input num-w" id="yTo" type="number" placeholder="到">
-  <select class="input" id="fsort">
-    <option value="">最新录入</option>
-    <option value="old">录入先后</option>
-    <option value="year">年份 ↑</option>
-    <option value="year_desc">年份 ↓</option>
-    <option value="value">估值 ↓</option>
-    <option value="code">编号 ↑</option>
-  </select>
-  <select class="input" id="fLevel"><option value="">全部等级</option></select>
-  <select class="input" id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
-  <button class="btn primary" id="go">查询</button>
-  {% if user and user.role == 'admin' %}
-  <a class="btn sm" href="#" id="exportBtn">⬇️ 导出台账</a>
-  <a class="btn sm" href="/api/export/register" download>📋 总登记账</a>
-  <a class="btn sm" href="#" id="importBtn">⬆️ 导入Excel</a>
-  <input type="file" id="importFile" accept=".xlsx" hidden>
-  <a class="btn sm" href="/api/backup/db" download>💾 备份数据库</a>
-  {% endif %}
+
+<!-- 结构化筛选工作台面板 -->
+<section class="filter-panel" id="filterPanel">
+  <div class="frow">
+    <input class="input grow" id="q" placeholder="搜索：名称/机构/编号/备注…（≥3字走全文索引）">
+    <button class="btn primary" id="go">查询</button>
+    <button class="btn sm" id="dimsToggle" style="display:none">筛选 ▾</button>
+    <span class="view-switch">
+      <button class="mini" id="vCards">🖼 展柜</button>
+      <button class="mini" id="vTable">📋 台账</button>
+    </span>
+  </div>
+  <div class="frow dims">
+    <select class="input" id="fCategory"><option value="">全部品类</option></select>
+    <select class="input" id="fSeries"><option value="">全部系列</option></select>
+    <select class="input" id="fStatus">
+      <option value="">全部状态</option>
+      <option value="draft">草稿</option><option value="in_stock">在库</option>
+      <option value="reviewing">送评中</option><option value="exhibited">展出中</option>
+      <option value="lent">借出</option><option value="lost">丢失</option>
+      <option value="retired">注销</option>
+    </select>
+    <select class="input" id="fLevel"><option value="">全部等级</option></select>
+    <span class="lab">纪年</span>
+    <input class="input num-w" id="yFrom" type="number" placeholder="从">
+    <input class="input num-w" id="yTo" type="number" placeholder="到">
+    <span class="lab">排序</span>
+    <select class="input" id="fsort">
+      <option value="">最新录入</option>
+      <option value="old">录入先后</option>
+      <option value="year">年份 ↑</option>
+      <option value="year_desc">年份 ↓</option>
+      <option value="value">估值 ↓</option>
+      <option value="code">编号 ↑</option>
+    </select>
+    <select class="input" id="fLocation"><option value="">全部库位</option><option value="none">未入库位</option></select>
+    {% if user and user.role == 'admin' %}
+    <a class="btn sm" href="#" id="exportBtn">⬇️ 导出台账</a>
+    <a class="btn sm" href="/api/export/register" download>📋 总登记账</a>
+    <a class="btn sm" href="#" id="importBtn">⬆️ 导入</a>
+    <input type="file" id="importFile" accept=".xlsx" hidden>
+    <a class="btn sm" href="/api/backup/db" download>💾 备份</a>
+    {% endif %}
+  </div>
 </section>
 <p class="hint"><a href="#" id="needPhotosLink">待补拍清单</a> · <span id="total"></span></p>
 <section id="needPhotos" hidden></section>
 
-<!-- 手机：单列大图卡片流 -->
+<!-- 画廊展柜视图 -->
 <div id="cards" class="cards"></div>
 
-<!-- 平板/PC：紧凑数据表格（对账友好） -->
+<!-- 紧凑台账视图 -->
 <div class="tblwrap">
 <table id="tbl">
   <thead><tr>
@@ -59,7 +72,6 @@ const STATUS = {draft:'草稿', in_stock:'在库', reviewing:'送评中', exhibi
 const PAGE = 50;
 let page = 0, lastData = null;
 const ADMIN = {{ 'true' if user and user.role == 'admin' else 'false' }};
-const mq = window.matchMedia('(min-width: 760px)');   // ≥760px 切紧凑表格
 const esc = s => String(s ?? '').replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const chipHTML = s => `<span class="chip c-${esc(s)}">${STATUS[s]||esc(s)}</span>`;
@@ -70,23 +82,36 @@ async function j(url, opt){
   return r.json();
 }
 
+/* ---------- 双视图：展柜 / 台账，localStorage 记忆偏好 ---------- */
+const mq = window.matchMedia('(min-width: 760px)');
+function applyView(v){
+  document.body.classList.remove('view-cards', 'view-table');
+  document.body.classList.add('view-' + v);
+  $('#vCards').classList.toggle('on', v === 'cards');
+  $('#vTable').classList.toggle('on', v === 'table');
+}
+(function initView(){
+  let v = localStorage.getItem('qb_view');
+  if(!v) v = mq.matches ? 'table' : 'cards';   // 无记忆时按设备给默认
+  applyView(v);
+  $('#vCards').onclick = () => { localStorage.setItem('qb_view','cards'); applyView('cards'); };
+  $('#vTable').onclick = () => { localStorage.setItem('qb_view','table'); applyView('table'); };
+})();
+
 async function loadStats(){
   const s = await j('/api/stats');
   const np = await j('/api/needs-photos');
-  let bar =
+  const card = (v, k, cls) =>
+    `<div class="stat-card ${cls||''}"><div class="v">${v}</div><div class="k">${k}</div></div>`;
+  $('#statsbar').innerHTML =
     card(s.total, '馆藏总数') +
     card(s.confirmed, '在库/展出等') +
     card(s.draft, '草稿待确认', s.draft ? 'warn' : '') +
     card(s.photos, '照片张数', 'gold') +
     card(s.attachments || 0, '来源凭证', 'gold') +
     card(np.count, '缺照片', np.count ? 'warn' : '') +
-    card(s.pub_views || 0, '导览浏览', 'gold');
-  if(s.est_total)
-    bar += card(Number(s.est_total).toLocaleString(), '估值合计(元)', 'gold');
-  $('#statsbar').innerHTML = bar;
-  function card(v, k, cls){
-    return `<div class="stat-card ${cls||''}"><div class="v">${v}</div><div class="k">${k}</div></div>`;
-  }
+    card(s.pub_views || 0, '导览浏览', 'gold') +
+    (s.est_total ? card(Number(s.est_total).toLocaleString(), '估值合计(元)', 'gold') : '');
   const sec = $('#needPhotos'); sec.hidden = true; sec.dataset.loaded = '';
   $('#needPhotosLink').textContent = `待补拍清单（${np.count}）`;
   $('#needPhotosLink').onclick = (e) => {
@@ -122,14 +147,14 @@ async function fillLocs(sel){
 function renderCards(items){
   const box = $('#cards');
   box.innerHTML = '';
-  if(!items.length){ box.innerHTML = '<p class="hint">没有符合条件的藏品</p>'; return; }
+  if(!items.length){ box.innerHTML = '<p class="empty">没有符合条件的藏品</p>'; return; }
   for(const it of items){
     const card = document.createElement('div');
     card.className = 'item-card';
     card.onclick = () => location = '/items/' + it.id;
     const thumb = it.thumb
-      ? `<img class="thumb" src="${it.thumb}" loading="lazy" alt="">`
-      : `<div class="thumb-empty">🪙</div>`;
+      ? `<div class="thumb"><img src="${it.thumb}" loading="lazy" alt=""></div>`
+      : `<div class="thumb"><div class="thumb-empty">🪙</div></div>`;
     const chips = [chipHTML(it.status)];
     if(it.level) chips.push(`<span class="chip c-level">${esc(it.level)}</span>`);
     if(it.grade_co)
@@ -153,7 +178,7 @@ function renderTable(items){
   tb.innerHTML = '';
   for(const it of items){
     const tr = document.createElement('tr');
-    tr.style.cursor = 'pointer';
+    tr.className = 'rowlink';
     tr.onclick = () => location = '/items/' + it.id;
     tr.innerHTML = `<td class="num">${esc(it.item_code)}</td><td>${esc(it.name)}</td>
       <td>${esc(it.category)}</td><td>${esc(it.series)}</td>
@@ -179,34 +204,7 @@ function render(){
   $('#pager').innerHTML = html;
 }
 
-async function search(p){
-  if(p !== undefined) page = p;
-  const params = new URLSearchParams();
-  if($('#q').value) params.set('q', $('#q').value);
-  if($('#fCategory').value) params.set('category', $('#fCategory').value);
-  if($('#fSeries').value) params.set('series', $('#fSeries').value);
-  if($('#fStatus').value) params.set('status', $('#fStatus').value);
-  if($('#yFrom').value) params.set('year_from', $('#yFrom').value);
-  if($('#yTo').value) params.set('year_to', $('#yTo').value);
-  if($('#fLocation').value)
-    params.set('location_id', $('#fLocation').value === 'none' ? -1 : $('#fLocation').value);
-  if($('#fLevel').value) params.set('level', $('#fLevel').value);
-  if($('#fsort').value) params.set('sort', $('#fsort').value);
-  params.set('limit', PAGE);
-  params.set('offset', page * PAGE);
-  const d = await j('/api/items?' + params);
-  $('#total').textContent = `共 ${d.total} 件`;
-  lastData = d;
-  render();
-}
-$('#go').onclick = () => search(0);
-$('#q').onkeydown = e => { if(e.key==='Enter') search(0); };
-$('#fLocation').onchange = () => search(0);
-mq.addEventListener('change', render);
-
-{% if user and user.role == 'admin' %}
-$('#exportBtn').onclick = e => {
-  e.preventDefault();
+function filterParams(){
   const p = new URLSearchParams();
   if($('#q').value) p.set('q', $('#q').value);
   if($('#fCategory').value) p.set('category', $('#fCategory').value);
@@ -216,8 +214,39 @@ $('#exportBtn').onclick = e => {
   if($('#yTo').value) p.set('year_to', $('#yTo').value);
   if($('#fLocation').value)
     p.set('location_id', $('#fLocation').value === 'none' ? -1 : $('#fLocation').value);
+  if($('#fLevel').value) p.set('level', $('#fLevel').value);
   if($('#fsort').value) p.set('sort', $('#fsort').value);
-  location.href = '/api/export/xlsx?' + p;
+  return p;
+}
+
+async function search(p){
+  if(p !== undefined) page = p;
+  const params = filterParams();
+  params.set('limit', PAGE);
+  params.set('offset', page * PAGE);
+  const d = await j('/api/items?' + params);
+  $('#total').textContent = `共 ${d.total} 件`;
+  lastData = d;
+  render();
+}
+$('#go').onclick = () => search(0);
+$('#q').onkeydown = e => { if(e.key==='Enter') search(0); };
+// 手机端：维度筛选默认收起，点"筛选"展开
+(function(){
+  const btn = $('#dimsToggle'), panel = $('#filterPanel');
+  if(window.matchMedia('(max-width: 759px)').matches) btn.style.display = '';
+  btn.onclick = () => panel.classList.toggle('open');
+})();
+$('#fLocation').onchange = () => search(0);
+mq.addEventListener('change', () => {
+  if(!localStorage.getItem('qb_view'))
+    applyView(mq.matches ? 'table' : 'cards');   // 无记忆偏好时跟随设备
+});
+
+{% if user and user.role == 'admin' %}
+$('#exportBtn').onclick = e => {
+  e.preventDefault();
+  location.href = '/api/export/xlsx?' + filterParams();
 };
 $('#importBtn').onclick = e => { e.preventDefault(); $('#importFile').click(); };
 $('#importFile').onchange = async e => {

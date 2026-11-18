@@ -274,9 +274,24 @@ function renderPhotos(photos){
 }
 function openLightbox(src){
   const lb = document.getElementById('lightbox');
-  document.getElementById('lbImg').src = src;
+  const img = document.getElementById('lbImg');
+  img.src = src;
+  img.style.transform = 'scale(1)';
   lb.hidden = false;
 }
+// 滚轮缩放细节，双击复位
+document.addEventListener('DOMContentLoaded', () => {
+  const lb = document.getElementById('lightbox'), img = document.getElementById('lbImg');
+  if(!lb) return;
+  let scale = 1;
+  lb.addEventListener('wheel', e => {
+    e.preventDefault();
+    scale = Math.min(4, Math.max(1, scale + (e.deltaY < 0 ? .18 : -.18)));
+    if(scale === 1) img.style.transform = '';
+    else img.style.transform = `scale(${scale})`;
+  }, {passive: false});
+  lb.addEventListener('dblclick', () => { scale = 1; img.style.transform = ''; });
+});
 
 $('#genIntro').onclick = async () => {
   $('#introSrc').textContent = '生成中…';
