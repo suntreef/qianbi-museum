@@ -44,6 +44,9 @@ def ingest_label(image_bytes: bytes) -> dict:
         fields: dict = {}
         parsed_from, cert_url, page_html, ocr_text = "none", None, None, None
         qr_url = qr.decode_qr(tmp)
+        # 过滤背面公众号关注码（如闻德背面 weixin.qq.com/r/...），不作证书查询链接
+        if qr_url and "weixin.qq.com/" in qr_url.lower():
+            qr_url = None
 
         with get_conn() as conn:
             # ① 二维码 → 证书页抓取 → 规则解析
@@ -62,7 +65,7 @@ def ingest_label(image_bytes: bytes) -> dict:
                     else:
                         cert_url = final_u
                     text = webfetch.extract_text(page["html"])
-                    if webfetch.is_spa_shell(text):
+                    if webfetch.is_spa_shell(text, page["html"]):
                         # 华夏等前端 Vue 空壳页（返回 200 但全是 {{QueryResult.xxx}}）：
                         # 不抓空壳里的占位装饰图，退回 URL 字段 + 标签 OCR 合并
                         fields.update(url_fields)

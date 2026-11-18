@@ -47,7 +47,17 @@ def read_text(image_path) -> Optional[str]:
             from PIL import Image
             with Image.open(image_path) as im:
                 w, h = im.size
-                if h > w * 0.5 and h >= 300:
+                # 竖拍横盒（如闻德 768x1024 顺时针90°侧拍）：逆时针转正后再裁顶部标签区
+                if h > w * 1.15 and w >= 300:
+                    rot = im.transpose(Image.Transpose.ROTATE_90)
+                    rw, rh = rot.size
+                    rot_top = rot.crop((0, 0, rw, max(1, int(rh * 0.42))))
+                    r_res, _ = eng(rot_top)
+                    for t in _extract_lines(r_res):
+                        if t not in seen:
+                            seen.add(t)
+                            parts.append(t)
+                elif h > w * 0.5 and h >= 300:
                     top = im.crop((0, 0, w, max(1, int(h * 0.42))))
                     top_res, _ = eng(top)
                     for t in _extract_lines(top_res):

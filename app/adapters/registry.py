@@ -16,10 +16,12 @@ BUILTIN_DOMAINS = {
     "ngccoin.com": "NGC",
     "pcgs.com": "PCGS",          # Cloudflare 403；PCGS Banknote 无二维码，走条码行 Spec.Grade/CertNo 解析
     "pcgs.com.cn": "PCGS",
-    "gongbocoins.com": "公博",      # 官网证书查询 /search（2026-11 实测可达；旧域 gbca.cn 已失效）
+    "gongbocoins.com": "公博",      # 官网证书查询 /search（UniApp 空壳，走 URL 编号 + 标签 OCR）
     "huaxiapj.com": "华夏",         # /c/{编号} → querySendItem.html?orderNum={编号}（SPA 空壳，取 URL 编号 + 标签 OCR）
     "huaxiapj.net": "华夏",         # 华夏繁体查询站
-    "wendepj.com": "闻德",          # 官网内证书查询（实测可达）
+    "wendepj.com": "闻德",          # 证书页 /zs?moneyid={编号}（静态可读，字段用 HTML 实体编码，含正反高清参考图）
+    "w-d.cc": "闻德",               # 闻德标签二维码短链域名（302 跳 wendepj.com/zs?moneyid=...）
+    "wdpj888.com": "闻德",
     "airmb.com": "爱藏",            # 证书查询 pj.airmb.com/dc/search（实测可达）
     "7788.com": "7788",          # m.7788.com/new/api/Grade/productCode/c/{编号}（跳登录页，取 URL 编号 + 标签 OCR）
     "997788.com": "7788",

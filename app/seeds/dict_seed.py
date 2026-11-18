@@ -170,17 +170,17 @@ SEEDS = [
     ("printer", "财政部印刷局", "北京白纸坊, 度支部印刷局, BEPP", 10, ""),
     ("printer", "中央印制厂", "CPF", 11, ""),
     ("printer", "中华书局", "Chung Hwa Book Co, CHBC, 中华书局版, 中华版", 12, ""),
-    ("printer", "商务印书馆", "Commercial Press, CP, 商务版", 13, ""),
+    ("printer", "商务印书馆", "Commercial Press, 商务印书馆版, 商务版", 13, ""),
     ("printer", "大东书局", "Tai Tung Press, Tai Tung Book Co, TTBC, 大东版", 14, ""),
     ("printer", "大业印刷公司", "Ta Yeh Printing", 15, ""),
     ("printer", "京华印书局", "", 16, ""),
 
     # —— 评级公司
     ("grade_co", "PMG", "Paper Money Guaranty, PAPERMONEYGUARANTY", 1, ""),
-    ("grade_co", "公博", "GBCA, 公博评级", 2, ""),
+    ("grade_co", "公博", "GBCA, GBPM, GONGBO PAPER MONEY GUARANTY, GONGBOPAPERMONEYGUARANTY, GONGBO, 公博评级", 2, ""),
     ("grade_co", "爱藏", "ACG, AI CANG, 爱藏评级", 3, ""),
     ("grade_co", "华夏", "CHGX, HXPJ, HUAXIA COIN GRADING, 华夏评级", 4, ""),
-    ("grade_co", "闻德", "WDVAC, 闻德评级", 5, ""),
+    ("grade_co", "闻德", "WMGS, WDVAC, Wende Money Grading, 闻德评级", 5, ""),
     ("grade_co", "保粹", "CCGA, BCMG, TSR, PCGA, 保粹评级", 6, ""),
     ("grade_co", "PCGS", "PCGS BANKNOTE", 7, ""),
     ("grade_co", "NGC", "", 8, ""),
@@ -215,17 +215,29 @@ SEEDS = [
 
 
 def load_seeds() -> int:
-    """写入库：名称已存在时只同步 code（后台改过的名称/别名/排序不动）。"""
+    """写入库：已存在条目同步 code，并增量补齐新增内置别名（保留后台手改过的自定义别名）。"""
     from ..models import get_conn
 
     changed = 0
     with get_conn() as conn:
         for type_, name, aliases, sort, code in SEEDS:
-            cur = conn.execute(
-                """INSERT INTO dict_entry(type, name, aliases, sort, code) VALUES(?,?,?,?,?)
-                   ON CONFLICT(type, name) DO UPDATE SET
-                     code = excluded.code,
-                     aliases = COALESCE(NULLIF(dict_entry.aliases, ''), excluded.aliases)""",
-                (type_, name, aliases or None, sort, (code or "").strip() or None))
-            changed += cur.rowcount
+            code_val = (code or "").strip() or None
+            row = conn.execute(
+                "SELECT id, aliases FROM dict_entry WHERE type=? AND name=?",
+                (type_, name)).fetchone()
+            if not row:
+                cur = conn.execute(
+                    "INSERT INTO dict_entry(type, name, aliases, sort, code) VALUES(?,?,?,?,?)",
+                    (type_, name, aliases or None, sort, code_val))
+                changed += cur.rowcount
+            else:
+                existing = [a.strip() for a in (row["aliases"] or "").split(",") if a.strip()]
+                for a in (aliases or "").split(","):
+                    a = a.strip()
+                    if a and a not in existing:
+                        existing.append(a)
+                merged_aliases = ", ".join(existing) or None
+                conn.execute(
+                    "UPDATE dict_entry SET code=?, aliases=? WHERE id=?",
+                    (code_val, merged_aliases, row["id"]))
     return changed

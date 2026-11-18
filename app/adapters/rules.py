@@ -21,10 +21,11 @@ _GRADE_BARE_EPQ = re.compile(r"\b(\d{1,2})\s*(EPQ|EPO|EPC|PPQ)\b", re.I)
 # 华夏等标签 EPQ 竖排在大号分数右侧且上沿略高，OCR 排序后呈 "EPO 53" / "EPC 53"
 _GRADE_EPQ_FIRST = re.compile(r"\b(EPQ|EPO|EPC|PPQ)\s*(\d{1,2})\b", re.I)
 _GRADE_EN_DESC = re.compile(
-    r"\b(\d{2})\s*(About\s*Un\w+|Uncirc\w*|Unc\w* circ\w*)", re.I)  # PMG 风格：53 About Uncirculated
+    r"\b(\d{2})\s*(?:Choice\s+|Gem\s+)?(About\s*Un\w+|Uncirc\w*|Unc\w* circ\w*|Extremely\s*Fine|Very\s*Fine)",
+    re.I)  # PMG / 闻德风格：53 About Uncirculated / 35 Choice Very Fine
 _GRADE_CN_NUM = re.compile(r"(\d{2})\s*分")
-_GRADE_CN_DESC = re.compile(r"(未使用|近未使用|极美品?|美品|上品|普品|全品)")
-_EPQ = re.compile(r"\b(EPQ|PPQ)\b")
+_GRADE_CN_DESC = re.compile(r"(未使用|近未使用|极美品?|上美品|美品|上品|中品|普品|全品|真品)")
+_EPQ = re.compile(r"\b(EPQ|EPO|EPC|PPQ)\b", re.I)
 # 中文面值：圆/元/角允许汉字或阿拉伯数字；「分」仅限汉字数字或 1/2/5 分，严防误吞古钱「82分」等级！
 _DENOM = re.compile(
     r"[壹贰叁肆伍陆柒捌玖拾佰仟万亿一二三四五六七八九十0-9]{1,8}\s*[圆元角]"
@@ -41,23 +42,28 @@ _EN_YEAR_BEFORE_DENOM = re.compile(
 
 # ---------- 编号 ----------
 _CERT_DIGITS_TEXT = re.compile(r"(?<![A-Za-z0-9./])(\d{7,12})(?![0-9./])")
-# 混合字母+数字评级编号：国标 DZB2607050045、保粹 B3735A3583、7788 70002207725F（8~18位且至少7位数字）
+# 混合字母+数字评级编号：国标 DZB2607050045、闻德 ALN250901006013、保粹 B3735A3583、7788 70002207725F
+# 限制总长 10~18 位且含至少 8 位数字，防止把公博无前缀纸币冠号（如 C1143490，8位7数字）误抓为评级编号
 _CERT_ALNUM_TEXT = re.compile(
-    r"\b((?=[A-Z0-9]{8,18}\b)(?=[A-Z0-9]*[A-Z])(?=(?:[A-Z]*\d){7})[A-Z0-9]{8,18})\b")
+    r"\b((?=[A-Z0-9]{10,18}\b)(?=[A-Z0-9]*[A-Z])(?=(?:[A-Z]*\d){8})[A-Z0-9]{10,18})\b")
+# 公博等纸币标签常直接印裸冠号（如 C 1143490，无「冠号：」前缀）
+_BARE_NOTE_SN = re.compile(r"\b([A-Z]{1,2}\s?[0-9]{6,8})\b")
 # PCGS 专属条码行：{品种号}.{分数}/{证书号}，如 1147710.45/88052280
 _PCGS_BARCODE = re.compile(r"\b(\d{5,8})\.(\d{2})/(\d{7,10})\b")
 _PCGS_GRADE_PFX = re.compile(r"\b(CHOICE|GEM)\s*(UNC|BU|AU|XF|EF|VF|F|VG)\b", re.I)
 # 评级标签裸分数（如保粹 65、7788 60，不带 EPQ/UNC 后缀）：仅在确认有评级公司标识时启用
-_CO_HINT = re.compile(r"(?:评级|GUARANTY|guarantee|BANKNOTE|PCGS|PMG|NGC|CCGA|ACG|7788)", re.I)
+_CO_HINT = re.compile(r"(?:评级|GUARANTY|guarantee|BANKNOTE|PCGS|PMG|NGC|CCGA|WMGS|GBPM|GBCA|ACG|7788)", re.I)
 _SHELDON_BARE = re.compile(r"(?:^|\s)(12|15|20|25|30|35|40|45|50|53|55|58|6[0-9]|70)(?=\s|$)")
+_MING_QING_ERA = re.compile(r"^(洪武|永乐|嘉靖|万历|顺治|康熙|雍正|乾隆|嘉庆|道光|咸丰|同治|光绪|宣统)")
 
-# ---------- 字段标签（国内评级公司证书页通用格式） ----------
+# ---------- 字段标签（国标 / 闻德等国内评级公司证书页通用格式） ----------
 _LABELED = [
-    ("cert_no", r"藏品编号\s*[:：]?\s*([A-Za-z0-9\-]{4,24})"),
+    ("cert_no", r"(?:藏品编号|认证编号)\s*[:：]?\s*([A-Za-z0-9\-]{4,24})"),
     ("name", r"藏品名称\s*[:：]?\s*(.+?)(?=\s*藏品|\s*数据|$)"),
-    ("year_text", r"藏品年代\s*[:：]?\s*([^\s]{2,16})"),
-    ("denomination", r"藏品面值\s*[:：]?\s*([^\s]{1,12})"),
-    ("serial_no", r"藏品冠号\s*[:：]?\s*([A-Za-z0-9\-]{1,24})"),
+    ("year_text", r"(?:藏品年代|发行年份)\s*[:：]?\s*([^\s（(]{2,16})"),
+    ("denomination", r"(?:藏品面值|(?<!图案)面值)\s*[:：]?\s*([^\s]{1,12})"),
+    ("serial_no", r"(?:藏品冠号|纸币冠号)\s*[:：]?\s*([A-Za-z0-9\-]{1,24})"),
+    ("variety", r"图案内容\s*[:：]?\s*([^\s]{1,20})"),
     ("grade_raw", r"藏品分数\s*[:：]?\s*([A-Za-z0-9+\-]{1,10})"),
 ]
 
@@ -65,9 +71,9 @@ _LABELED = [
 _CATALOG = re.compile(r"(?i:Pick)\s*#?\s*([A-Z]?[0-9]{1,5}[a-z]?)(?![0-9])")
 _CATALOG_SM = re.compile(
     r"(?i:S/M)\s*#?\s*([A-Z]{1,2}\s?[0-9]{1,4}(?:-(?:[0-9]{1,3}[a-z]|[0-9]{1,2}(?!\d)))?)")
-# 冠号：PMG S/N C072709；PCGS Serial#L0325587Printer:TTBC；国内 冠号：1-B755211 / 冠号S2761545
+# 冠号：PMG S/N C072709；PCGS Serial#L0325587；国内 冠号 / 冠字编号 / 字冠号
 _SN_PMG = re.compile(r"(?:S/N|Serial\s*#?)\s*([A-Z]{0,3}\s?[0-9]{4,10})", re.I)
-_SN_ACG = re.compile(r"冠号\s*[：:]?\s*([A-Z]{0,3}[-—]?\s?[0-9A-Z-]{4,14})", re.I)
+_SN_ACG = re.compile(r"(?:冠字?编?号|纸币冠号|字冠号)\s*[：:]?\s*([A-Z]{0,3}[-—]?\s?[0-9A-Z-]{4,14})", re.I)
 # 英文面值 → 中文（PMG/PCGS 标签；中国纸币 10/20/50 Cents 对应 壹角/贰角/伍角）
 _EN_DENOM = [
     (re.compile(r"(\d+)\s*Cents?", re.I), "分"),
@@ -103,7 +109,7 @@ def _guess_scale(raw: str) -> Optional[str]:
         return "70制"
     if "分" in raw:
         return "85制"
-    if raw in ("未使用", "近未使用", "极美", "极美品", "美品", "上品", "普品", "全品"):
+    if raw in ("未使用", "近未使用", "极美", "极美品", "上美品", "美品", "上品", "中品", "普品", "全品", "真品"):
         return "描述"
     return None
 
@@ -115,13 +121,23 @@ def _cands(name: str, aliases: Optional[str]) -> list:
     return out
 
 
+def _hit_in_text(cand: str, text: str) -> bool:
+    if not cand or cand not in text:
+        return False
+    # 短英文缩写（如 ACG/PMG/CPF/TTBC）须满足字母边界，防止网站备案号 ICP 误命中 CP 等子串
+    if cand.isascii() and len(cand) <= 6 and cand.isalpha():
+        return re.search(rf"(?<![A-Za-z]){re.escape(cand)}(?![A-Za-z])", text) is not None
+    return True
+
+
 def _best_match(rows, text: str):
     """挑"最长命中"的条目：避免 'Bank of China'（中国银行）抢走
-    'Central Bank of China'（中央银行）这种子串误匹配。等长时 sort 小者优先。"""
+    'Central Bank of China'（中央银行）、'PAPERMONEYGUARANTY' 抢走
+    'GONGBOPAPERMONEYGUARANTY' 这种子串误匹配。等长时 sort 小者优先。"""
     best, best_key = None, None
     for r in rows:
         for c in _cands(r["name"], r["aliases"]):
-            if c and c in text:
+            if _hit_in_text(c, text):
                 key = (len(c), -(r["sort"] or 0))
                 if best_key is None or key > best_key:
                     best, best_key = r, key
@@ -129,7 +145,7 @@ def _best_match(rows, text: str):
 
 
 def parse_labeled_fields(text: str) -> dict:
-    """「藏品XX：值」字段标签解析（国标等国内公司证书页格式）。"""
+    """「藏品XX：值」字段标签解析（国标 / 闻德等国内公司证书页格式）。"""
     out = {}
     for key, pat in _LABELED:
         m = re.search(pat, text)
@@ -137,11 +153,20 @@ def parse_labeled_fields(text: str) -> dict:
             v = m.group(1).strip()
             if v:
                 out[key] = v
+    # 闻德证书页格式：「分值/描述： 58／Choice About Unc」+ 可选「EPQ： EPQ」
+    if not out.get("grade_raw"):
+        m_wd = re.search(r"分值/描述\s*[:：]\s*(\d{1,2})\s*[/／]", text)
+        if m_wd:
+            g_raw = m_wd.group(1)
+            if re.search(r"EPQ\s*[:：]\s*(EPQ|PPQ)", text, re.I):
+                g_raw += " EPQ"
+            out["grade_raw"] = g_raw
+            out["grade_scale"] = "70制"
     if out.get("year_text"):
         g = years.to_gregorian(out["year_text"])
         if g:
             out["year_sort"] = g
-    if out.get("grade_raw"):
+    if out.get("grade_raw") and not out.get("grade_scale"):
         scale = _guess_scale(out["grade_raw"])
         if scale:
             out["grade_scale"] = scale
@@ -258,7 +283,11 @@ def parse_grade(text: str, has_company: bool = False) -> dict:
         return out
     m = _GRADE_EN_DESC.search(text)
     if m:
-        out.update({"grade_raw": m.group(1), "grade_scale": "70制"})
+        raw = m.group(1)
+        m_epq = _EPQ.search(text)
+        if m_epq:
+            raw += f" {_norm_epq(m_epq.group(1))}"
+        out.update({"grade_raw": raw, "grade_scale": "70制"})
         return out
     m = _GRADE_CN_NUM.search(text)
     if m:
@@ -268,7 +297,7 @@ def parse_grade(text: str, has_company: bool = False) -> dict:
     if m:
         out.update({"grade_raw": m.group(1), "grade_scale": "描述"})
         return out
-    # 保粹（65）、7788（60）等纸币标签常直接印裸分数（不带 EPQ/UNC）；
+    # 保粹（65）、7788（60）、闻德竖排跨行（58 ... EPO）等：
     # 仅在确认有评级公司上下文时匹配独立 Sheldon 分数，剔除面值/纪年/目录号防误判
     if has_company or _CO_HINT.search(text):
         cleaned = re.sub(r"(?i:Pick)\s*#?\s*[A-Z0-9a-z-]+", " ", text)
@@ -277,15 +306,20 @@ def parse_grade(text: str, has_company: bool = False) -> dict:
         cleaned = re.sub(r"(?:民国|光绪|宣统)\s*\d+\s*年", " ", cleaned)
         m = _SHELDON_BARE.search(cleaned)
         if m:
-            out.update({"grade_raw": m.group(1), "grade_scale": "70制"})
+            raw = m.group(1)
+            m_epq = _EPQ.search(text)
+            if m_epq:
+                raw += f" {_norm_epq(m_epq.group(1))}"
+            out.update({"grade_raw": raw, "grade_scale": "70制"})
     return out
 
 
 def _cert_no_from_url(url: str) -> Optional[str]:
     m = (re.search(r"(?:cert(?:ificate)?|sn|serial|number|no\.?|id)[=/#]([0-9]{4,16})",
                    url, re.I)
-         or re.search(r"(?:order(?:num|no)?|num|code|bh|q)[=/#]([A-Za-z0-9]{6,20})",
-                      url, re.I)
+         or re.search(
+             r"(?:order(?:num|no)?|moneyid|num|code|bh|q)[=/#]((?=(?:[A-Za-z]*\d){4})[A-Za-z0-9]{6,20})",
+             url, re.I)
          or re.search(
              r"[/?#]((?=[A-Z0-9]{8,18}(?:[/?#&]|$))(?=[A-Z0-9]*[A-Z])(?=(?:[A-Z]*\d){6})[A-Z0-9]{8,18})(?:[/?#&]|$)",
              url)
@@ -311,6 +345,9 @@ def _finish(fields: dict) -> dict:
             if m_en:
                 fields["year_text"] = f"{m_en.group(1)}年"
                 fields["year_sort"] = int(m_en.group(1))
+    # 跨清末民初机构（如交通银行、中国通商银行、四明银行）：若纪年明确为清代年号，归入「明清票券」
+    if fields.get("series") == "民国纸币" and _MING_QING_ERA.search(fields.get("year_text") or ""):
+        fields["series"] = "明清票券"
     fields.pop("_text", None)
     if not fields.get("grade_raw"):
         fields.pop("grade_scale", None)
@@ -379,10 +416,21 @@ def parse_label_ocr(text: str) -> dict:
     if not fields.get("grade_raw"):
         fields.update(parse_grade(text, has_company=bool(fields.get("grade_co"))))
     if not fields.get("cert_no"):
-        cand_text = re.sub(r"(?:冠号\s*[:：]?|S/N|Serial\s*#?)\s*[A-Za-z0-9\-—]+", " ", text, flags=re.I)
+        cand_text = re.sub(
+            r"(?:冠字?编?号\s*[:：]?|纸币冠号\s*[:：]?|字冠号\s*[:：]?|S/N|Serial\s*#?)\s*[A-Za-z0-9\-—]+",
+            " ", text, flags=re.I)
         if fields.get("serial_no"):
             cand_text = cand_text.replace(fields["serial_no"], " ")
         m = _CERT_ALNUM_TEXT.search(cand_text) or _CERT_DIGITS_TEXT.search(cand_text)
         if m:
             fields["cert_no"] = m.group(1)
+    # 公博等纸币标签常直接印裸冠号（如 C 1143490，无前缀）：在已锁定纸币且排除 cert_no/Pick# 后补提
+    if not fields.get("serial_no") and (fields.get("bank") or fields.get("note_type")):
+        sn_cand = re.sub(r"(?i:Pick)\s*#?\s*[A-Z0-9a-z-]+", " ", text)
+        sn_cand = re.sub(r"(?i:S/M)\s*#?\s*[A-Z0-9a-z-]+", " ", sn_cand)
+        if fields.get("cert_no"):
+            sn_cand = sn_cand.replace(fields["cert_no"], " ")
+        m_sn = _BARE_NOTE_SN.search(sn_cand)
+        if m_sn:
+            fields["serial_no"] = m_sn.group(1).replace(" ", "")
     return _finish(fields)

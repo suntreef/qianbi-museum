@@ -6,6 +6,7 @@
 - 重定向不自动跟随：每一跳重新过公网校验，最多 3 跳
 - 响应体限量读取；图片过滤明显的站点装饰资源
 """
+import html as _html_lib
 import ipaddress
 import re
 import socket
@@ -27,8 +28,10 @@ _last_fetch = 0.0
 _img_re = re.compile(
     r"""<img[^>]+src\s*=\s*["']([^"']+)["']""", re.I)
 _junk_img = re.compile(
-    r"(head|logo|icon|banner|btn|/bg|_bg|qrcode?|no-senditem|pjtz|wenhao|link-info|star-line)", re.I)
+    r"(head|logo|icon|banner|btn|/bg|_bg|qrcode?|no-senditem|pjtz|wenhao|link-info|star-line"
+    r"|tel\.|clock\.|home\.|xuaixan|weixin|beian|icp|\.svg(?:[?#]|$))", re.I)
 _spa_tpl_re = re.compile(r"\{\{[^{}]{1,80}\}\}")
+_spa_mount_re = re.compile(r"""<div\s+id\s*=\s*["']?(?:app|root)["']?\s*>\s*</div>""", re.I)
 
 
 def _ip_is_public(ip: ipaddress.IPv4Address) -> bool:
@@ -96,18 +99,23 @@ def fetch_page(url: str, depth: int = 0) -> Optional[dict]:
 
 
 def extract_text(html: str) -> str:
-    """粗提取可见文本：去掉 script/style/标签，折叠空白。"""
-    html = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
-    text = re.sub(r"(?s)<[^>]+>", " ", html)
+    """粗提取可见文本：去掉 script/style/标签，解码 HTML 实体（如闻德 &#x...;），折叠空白。"""
+    cleaned = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
+    text = _html_lib.unescape(re.sub(r"(?s)<[^>]+>", " ", cleaned))
     return re.sub(r"\s+", " ", text).strip()
 
 
-def is_spa_shell(text: str) -> bool:
-    """识别纯前端动态渲染空壳页或强制登录跳板（如华夏 {{QueryResult.xxx}}、保粹有证链空壳、7788 h5登录）。
-    命中空壳时不应把模板文字和占位图当真证书页，应退回 URL 提取 + 标签 OCR。"""
+def is_spa_shell(text: str, html: str = "") -> bool:
+    """识别纯前端动态渲染空壳页或强制登录跳板（华夏 {{QueryResult}}、公博 <div id=app></div>、保粹有证链、7788 h5登录）。"""
     if not text or len(text.strip()) < 10:
         return True
-    return len(_spa_tpl_re.findall(text)) >= 2
+    if len(_spa_tpl_re.findall(text)) >= 2:
+        return True
+    if html and _spa_mount_re.search(html):
+        body_only = re.sub(r"(?is)<head[^>]*>.*?</head>", " ", html)
+        if len(extract_text(body_only)) < 15:
+            return True
+    return False
 
 
 def extract_image_urls(html: str, base_url: str, limit: int = 6) -> list:

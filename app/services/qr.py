@@ -33,6 +33,12 @@ def decode_qr(image_path) -> Optional[str]:
                 c = gray.crop((int(w * (1 - frac)), 0, w, max(1, int(h * 0.4))))
                 variants.append(c.resize((c.width * scale, c.height * scale),
                                          Image.LANCZOS))
+            # 竖拍横盒兜底（90°侧拍时小码落在右下角/左上角）
+            if h > w * 1.15:
+                rot = gray.transpose(Image.Transpose.ROTATE_90)
+                rw, rh = rot.size
+                rc = rot.crop((int(rw * 0.55), 0, rw, max(1, int(rh * 0.4))))
+                variants.append(rc.resize((rc.width * 6, rc.height * 6), Image.LANCZOS))
             fallback = None
             for im in variants:
                 try:

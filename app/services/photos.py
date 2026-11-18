@@ -48,6 +48,8 @@ def save_image(data: bytes, item_id: int, shot_type: str,
         img.load()
     except Exception:
         return None
+    if origin == "reference" and min(img.size) < 120:
+        return None   # 过滤官网页面里混入的小图标与分割线装饰图
     exif_time = _exif_time(img)
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")

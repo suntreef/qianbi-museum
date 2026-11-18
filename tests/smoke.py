@@ -683,4 +683,63 @@ with TestClient(app) as c:
           and f.get("serial_no") == "L0325587",
           str({k: f.get(k) for k in ("grade_co", "cert_no", "grade_raw", "catalog_ref", "denomination")}))
 
+    # ---------- 真实样本回归：公博 GBPM / 闻德 WMGS（2026-11-18） ----------
+    # 1) 公博 GBPM：GONGBOPAPERMONEYGUARANTY 粘连不误归 PMG；无前缀裸冠号 C1143490 不抢占 1510214530；真品描述级
+    gb_ocr = ("江西裕民银行 2o 真品 GBPM 博 民国伍分上海大东书局 "
+              "1510214530 GONGBOPAPERMONEYGUARANTY C1143490 2￥o 行銀民裕西江 分伍")
+    f = rules.parse_label_ocr(gb_ocr)
+    check("真实样本-公博GBPM全字段",
+          f.get("grade_co") == "公博" and f.get("cert_no") == "1510214530"
+          and f.get("serial_no") == "C1143490" and f.get("grade_raw") == "真品"
+          and f.get("grade_scale") == "描述" and f.get("bank") == "江西裕民银行"
+          and f.get("printer") == "大东书局" and f.get("denomination") == "伍分",
+          str({k: f.get(k) for k in ("grade_co", "cert_no", "serial_no", "grade_raw", "denomination")}))
+    # 公博官网 SPA 空壳（<title>有文字但<div id=app></div>为空）必须识别为空壳
+    check("SPA空壳-div#app检测",
+          ing.webfetch.is_spa_shell("北京公博古钱币艺术品鉴定有限公司",
+                                    "<html><head><title>北京公博古钱币艺术品鉴定有限公司</title></head>"
+                                    "<body><div id=app></div></body></html>"))
+
+    # 2) 闻德 WMGS 证书页：HTML 十六进制实体编码字段名 + 清代宣统纪年归「明清票券」 + 备案号 ICP 不误触印刷厂
+    wd_html = (
+        "<html><body><img src='http://www.wendepj.com/images/tel.svg'>"
+        "<img src='http://pic-sv3.w-d.cc/objpic/pzb/ALN/2025-09/ALN250901006013_1.jpg'>"
+        "<p><span>认证编号：</span>ALN250901006013</p>"
+        "<p><span>&#x7EB8;&#x5E01;&#x7248;&#x5F0F;：</span>纸币</p>"
+        "<p><span>&#x540D;&#x79F0;：</span>交通银行</p>"
+        "<p><span>&#x56FE;&#x6848;&#x5185;&#x5BB9;：</span>广东</p>"
+        "<p><span>&#x9762;&#x503C;：</span>伍圆</p>"
+        "<p><span>&#x53D1;&#x884C;&#x5E74;&#x4EFD;：</span>宣统元年（1909）</p>"
+        "<p><span>&#x7EB8;&#x5E01;&#x51A0;&#x53F7;：</span>037243</p>"
+        "<p><span>&#x5206;&#x503C;/&#x63CF;&#x8FF0;：</span>58／Choice About Unc</p>"
+        "<p><span>EPQ：</span>EPQ</p>"
+        "<footer>网站备案号：苏ICP备16040087号-1</footer></body></html>"
+    )
+    wd_url = "http://www.wendepj.com/zs?moneyid=ALN250901006013"
+    wd_text = ing.webfetch.extract_text(wd_html)
+    wd_imgs = ing.webfetch.extract_image_urls(wd_html, wd_url)
+    f = rules.parse_cert_page(wd_text, wd_url)
+    check("真实样本-闻德证书页(HTML实体解码)",
+          f.get("cert_no") == "ALN250901006013" and f.get("bank") == "交通银行"
+          and f.get("series") == "明清票券" and f.get("year_sort") == 1909
+          and f.get("variety") == "广东" and f.get("denomination") == "伍圆"
+          and f.get("serial_no") == "037243" and f.get("grade_raw") == "58 EPQ"
+          and not f.get("printer") and company_for_url("http://w-d.cc/ALN4pRV3dz") == "闻德"
+          and wd_imgs == ["http://pic-sv3.w-d.cc/objpic/pzb/ALN/2025-09/ALN250901006013_1.jpg"],
+          str({k: f.get(k) for k in ("cert_no", "series", "variety", "grade_raw", "printer")}))
+
+    # 3) 闻德 WMGS 离线标签 OCR（豫鄂边区 35 Choice Very Fine & 冀南银行 62 EPQ）
+    wd_ocr2 = ("闻德评级 豫鄂边区建设银行 拾圆 35 中华民国二十一年（1932） "
+               "WMGS 冠字编号：F026954 Choice Very Fine ALN250520001005")
+    f2_wd = rules.parse_label_ocr(wd_ocr2)
+    wd_ocr3 = ("WMGS 冀南银行贰仟圆 62 闻德评级 EP 中华民国三十七年（1948） "
+               "冠字编号：D7974692 Uncirculated ALN250814001065 EPQ")
+    f3_wd = rules.parse_label_ocr(wd_ocr3)
+    check("真实样本-闻德标签OCR兜底",
+          f2_wd.get("grade_co") == "闻德" and f2_wd.get("cert_no") == "ALN250520001005"
+          and f2_wd.get("series") == "边区·解放区" and f2_wd.get("grade_raw") == "35"
+          and f2_wd.get("serial_no") == "F026954"
+          and f3_wd.get("cert_no") == "ALN250814001065" and f3_wd.get("grade_raw") == "62 EPQ",
+          str((f2_wd.get("grade_raw"), f3_wd.get("grade_raw"))))
+
 print(f"\n== 冒烟测试完成：{ok_count} 项通过 ==")
