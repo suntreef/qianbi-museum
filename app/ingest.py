@@ -34,8 +34,10 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def ingest_label(image_bytes: bytes) -> dict:
-    """处理一张评级标签照片，返回识别结果与草稿 item_id。"""
+def ingest_label(image_bytes: bytes, dual_ocr: bool = False) -> dict:
+    """处理一张评级标签照片，返回识别结果与草稿 item_id。
+    dual_ocr=True（批量队列用）：Indra 快速引擎与 RapidOCR 双跑，
+    字段取并集（RapidOCR 优先）——批量字段完整度更高。"""
     tmp_dir = PHOTO_DIR / "_tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp = tmp_dir / f"{uuid4().hex}.jpg"

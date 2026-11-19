@@ -28,7 +28,7 @@ def _process(row) -> None:
     try:
         with open(row["path"], "rb") as f:
             data = f.read()
-        res = ingest_label(data)
+        res = ingest_label(data, dual_ocr=True)
         if res.get("dupe"):
             status = "dup"
             item_id = res["existing"]["id"]

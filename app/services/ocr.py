@@ -74,3 +74,42 @@ def read_text(image_path) -> Optional[str]:
         return " ".join(parts) if parts else None
     except Exception:
         return None
+
+
+# ---------- 第二引擎：Indra OCR（可选，速度 15~38 倍，用于批量字段互补） ----------
+# 实测（2026-11 真实标签）：速度 0.2~0.5s/张（RapidOCR 7~9s）；
+# 英文拼写质量更高（Tsingtao 正确），但中文密集小字漏检多——
+# 不替换主引擎，仅在批量队列中与 RapidOCR 双跑做字段互补。
+_indra_conv = None
+_indra_tried = False
+
+
+def indra_available() -> bool:
+    """Indra 可用性：库已安装且模型加载成功（首次会从 HuggingFace 下载，
+    国内环境可设环境变量 HF_ENDPOINT=https://hf-mirror.com 加速）。"""
+    global _indra_conv, _indra_tried
+    if _indra_tried:
+        return _indra_conv is not None
+    _indra_tried = True
+    try:
+        import indra_ocr
+        _indra_conv = indra_ocr.load(threads=4)
+    except Exception:
+        _indra_conv = None
+    return _indra_conv is not None
+
+
+def read_text_indra(image_path):
+    """Indra 引擎：返回 (text, avg_conf)；不可用/失败返回 (None, 0)。"""
+    if not indra_available():
+        return None, 0
+    try:
+        import cv2
+        gray = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2GRAY)
+        page = _indra_conv.ocr(gray)
+        text = (page.text or "").strip()
+        lines = page.lines or []
+        conf = round(sum(l.conf for l in lines) / len(lines), 2) if lines else 0
+        return (text or None), conf
+    except Exception:
+        return None, 0
