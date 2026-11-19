@@ -196,6 +196,7 @@ const TEXTS = [
 ];
 
 let currentStageUrl = '';
+let photoUrls = [];   // 灯箱 ←→ 切换用
 
 async function j(url, opt){
   const r = await fetch(url, opt);
@@ -220,6 +221,7 @@ function updatePlaque(d){
 
 async function buildForm(d){
   updatePlaque(d);
+  document.title = (d.item_code || '档案') + ' · ' + (d.name || '') + ' · {{ site.name }}';
   $('#meta').textContent = `录入：${d.created_at||''} · 更新：${d.updated_at||''}` + (d.cert_url ? ` · 官网证书已关联` : '');
   // 公开导览页链接（真实路由：/pub/item/{馆内编号}）
   const pubLink = document.getElementById('pubLink');
@@ -354,6 +356,7 @@ function setStagePhoto(url){
 function renderPhotos(photos){
   const row = $('#photoRow');
   row.innerHTML = '';
+  photoUrls = photos.map(p => p.url);   // 灯箱 ←→ 切换用
   if(!photos.length){
     setStagePhoto('');
     return;
@@ -403,6 +406,16 @@ document.addEventListener('DOMContentLoaded', () => {
     img.style.transform = scale === 1 ? '' : `scale(${scale})`;
   }, {passive: false});
   lb.addEventListener('dblclick', () => { scale = 1; img.style.transform = ''; });
+  // 键盘：Esc 关闭，←→ 在照片间切换
+  document.addEventListener('keydown', e => {
+    if(lb.hidden) return;
+    if(e.key === 'Escape'){ lb.hidden = true; return; }
+    if(e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if(photoUrls.length < 2) return;
+    const i = photoUrls.indexOf(img.src.split('?')[0]);
+    const n = (i + (e.key === 'ArrowRight' ? 1 : -1) + photoUrls.length) % photoUrls.length;
+    img.src = photoUrls[n]; scale = 1; img.style.transform = '';
+  });
 });
 
 $('#genIntro').onclick = async () => {
@@ -435,6 +448,9 @@ $('#genTts').onclick = async () => {
 };
 
 $('#save').onclick = async () => {
+  if($('#save').dataset.busy) return;
+  $('#save').dataset.busy = '1';
+  $('#save').textContent = '💾 保存中…';
   const fields = {};
   for(const [f] of SELECTS){ const v = $('#f_'+f).value; if(v) fields[f]=v; }
   for(const [f] of TEXTS){ fields[f] = $('#f_'+f).value || null; }
@@ -449,6 +465,8 @@ $('#save').onclick = async () => {
     est_date:val('est_date') || null};
   const d = await j(`/api/items/${ID}`, {method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  delete $('#save').dataset.busy;
+  $('#save').textContent = '💾 保存档案修改';
   alert(d.ok ? '✅ 已保存' : '保存失败');
   if(d.ok) location.reload();
 };

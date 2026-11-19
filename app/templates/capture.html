@@ -82,6 +82,7 @@ function feedback(good = true) {
   if (navigator.vibrate) navigator.vibrate(good ? 28 : [60, 40, 60]);
   beep(good ? 1250 : 520);
 }
+let lastItemId = null;   // 最近一次建档：低质量照片归并到它
 const DICT_FIELDS = {category:'category', series:'series', dynasty:'dynasty',
   bank:'bank', note_type:'note_type', printer:'printer', doc_type:'doc_type',
   grade_co:'grade_co'};
@@ -114,7 +115,7 @@ async function upload(file, url, extra){
 }
 
 async function handleLabelFiles(files){
-  let i = 0, ok = 0, dup = 0, merged = 0, lastItemId = null;
+  let i = 0, ok = 0, dup = 0, merged = 0;
   for(const f of files){
     i++;
     toast(`识别中 ${i}/${files.length}：` + f.name);
@@ -216,6 +217,10 @@ async function addCard(id, f, meta){
 }
 
 async function confirmCard(card, id){
+  const btn = card.querySelector('.confirm');
+  if(btn.dataset.busy) return;
+  btn.dataset.busy = '1';
+  btn.textContent = '⏳ 入库中…';
   const fields = {};
   card.querySelectorAll('select[name]').forEach(el=>{ if(el.value) fields[el.name]=el.value; });
   card.querySelectorAll('input[data-field]').forEach(el=>{
@@ -227,8 +232,11 @@ async function confirmCard(card, id){
   });
   if(r.status===401) return location='/login';
   const d = await r.json();
+  delete btn.dataset.busy;
+  btn.textContent = '✅ 确认入库';
   if(d.ok){ feedback(true); card.remove(); toast('✅ 已入库 ' + d.item_code); }
-  else { feedback(false); toast('保存失败：' + (d.detail || d.error || ''), false); }
+  else { feedback(false); btn.textContent = '✅ 确认入库';
+         toast('保存失败：' + (d.detail || d.error || ''), false); }
 }
 
 $('#labelInput').onchange = e => { handleLabelFiles([...e.target.files]); e.target.value=''; };
@@ -238,7 +246,7 @@ $('#manualBtn').onclick = async () => {
   });
   if(r.status===401) return location='/login';
   const d = await r.json();
-  if(d.ok) addCard(d.item_id, {}, {parsed_from:'none', ref_photos:0});
+  if(d.ok){ lastItemId = d.item_id; addCard(d.item_id, {}, {parsed_from:'none', ref_photos:0}); }
 };
 </script>
 {% endblock %}

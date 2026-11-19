@@ -103,7 +103,7 @@ fetch('/api/pub/item/' + encodeURIComponent('{{ code }}')).then(r => {
   }
   html += '</table>';
   document.getElementById('main').innerHTML = html;
-  document.title = d.name || '藏品导览';
+  document.title = (d.name || '藏品导览') + ' · {{ site.name }}';
   document.querySelectorAll('.gallery img').forEach(im => {
     im.onclick = () => {
       const lb = document.getElementById('lbImg');

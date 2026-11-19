@@ -18,9 +18,13 @@
 
 <section class="statsbar" id="statsbar"></section>
 
-<section class="filter-panel">
+<section class="filter-panel" id="filterPanel">
   <div class="filters">
     <input class="input grow" id="q" placeholder="🔍 搜索名称 / 发行机构 / 馆内编号 / 冠字号 / 备注…">
+    <button class="btn primary" id="go">查询</button>
+    <button class="btn sm" id="dimsToggle" style="display:none">筛选 ▾</button>
+  </div>
+  <div class="filters dims" id="dims">
     <select class="input" id="fCategory"><option value="">全部品类</option></select>
     <select class="input" id="fSeries"><option value="">全部系列</option></select>
     <select class="input" id="fStatus">
@@ -42,7 +46,6 @@
       <option value="value">排序：估值 ↓</option>
       <option value="code">排序：编号 ↑</option>
     </select>
-    <button class="btn primary" id="go">查询</button>
   </div>
 
   <div class="filter-bar-bottom">
@@ -312,5 +315,21 @@ Promise.all([fill($('#fCategory'),'category'), fill($('#fSeries'),'series'),
       $('#q').value = new URLSearchParams(location.search).get('q');
     search(0); loadStats();
   });
+
+// 手机端：维度筛选默认收起，点「筛选」展开
+(function(){
+  const btn = document.getElementById('dimsToggle'),
+        dims = document.getElementById('dims');
+  if(!btn || !dims) return;
+  if(window.matchMedia('(max-width: 640px)').matches){
+    btn.style.display = '';
+    dims.style.display = 'none';
+    btn.onclick = () => {
+      const open = dims.style.display === 'none';
+      dims.style.display = open ? 'flex' : 'none';
+      btn.textContent = open ? '筛选 ▴' : '筛选 ▾';
+    };
+  }
+})();
 </script>
 {% endblock %}
