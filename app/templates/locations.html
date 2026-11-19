@@ -10,7 +10,11 @@
 <div class="card">
   <div class="card-head"><span>🏛️ 场馆平面格式图</span>
     <span class="hint" id="mapHint"></span></div>
-  <div id="mapGrid" class="map-grid"></div>
+  <div id="mapGrid" class="map-grid edit" style="grid-template-columns:repeat(8,1fr)"></div>
+  <div class="filters" style="margin-top:10px">
+    <button class="btn sm" id="layoutBtn">🔒 调整位置</button>
+    <span class="hint" id="editHint">点击柜子下钻；点「调整位置」可自由摆放柜子</span>
+  </div>
   <div id="mapDrill" class="map-drill" hidden></div>
 </div>
 
@@ -48,20 +52,106 @@ function toast(msg){
 }
 const nameOf = id => (LOC.find(l => l.id === id) || {}).name || '';
 
-/* ---------- 场馆平面格式图 ---------- */
+/* ---------- 场馆平面格式图（固定网格 + 编辑摆放） ---------- */
+const COLS = 8;
+let editMode = false, pickId = null;
+
 function renderMap(){
-  const cabinets = LOC.filter(l => !l.parent_id);
+  const cabinets = LOC.filter(l => !l.parent_id && l.grid_x !== null);
+  const orphan = LOC.filter(l => !l.parent_id && l.grid_x === null);
   const grid = $('#mapGrid');
-  $('#mapHint').textContent = cabinets.length ? `${cabinets.length} 个展柜 · 点击柜子下钻` : '还没有展柜——在下方添加第一台';
-  grid.innerHTML = cabinets.map(l => `
-    <div class="map-cell" data-id="${l.id}" onclick="drill(${l.id})">
-      <div class="map-code">${l.code || '未编号'}</div>
-      <div class="map-name">${l.name}</div>
-      <div class="map-count">${l.items} 件</div>
-    </div>`).join('');
+  const maxY = Math.max(0, ...cabinets.map(l => l.grid_y || 0));
+  let cells = '';
+  for(let y = 0; y <= maxY; y++){
+    for(let x = 0; x < COLS; x++){
+      const l = cabinets.find(c => c.grid_x === x && c.grid_y === y);
+      if(l){
+        cells += `<div class="map-cell ${pickId===l.id?'picked':''}"
+          onclick="cellClick(${l.id})" title="${l.name}">
+          <div class="map-code">${l.code || '未编号'}</div>
+          <div class="map-name">${l.name}</div>
+          <div class="map-count">${l.items} 件</div></div>`;
+      } else {
+        cells += `<div class="map-cell empty ${editMode?'editable':''}"
+          onclick="cellClick(null, ${x}, ${y})"></div>`;
+      }
+    }
+  }
+  grid.innerHTML = cells;
+  $('#mapHint').textContent = editMode
+    ? `摆放中：先点柜子，再点目标格（有柜则互换）`
+    : `${cabinets.length} 个展柜 · 点击柜子下钻`;
+  // 孤儿柜（未分配格子的旧数据）自动补位
+  if(orphan.length) autoPlace(orphan);
 }
 
+async function autoPlace(orphan){
+  for(const l of orphan){
+    const taken = new Set(
+      LOC.filter(c => !c.parent_id && c.grid_x !== null)
+         .map(c => c.grid_x + ',' + c.grid_y));
+    let placed = false;
+    for(let y = 0; y < 40 && !placed; y++){
+      for(let x = 0; x < COLS && !placed; x++){
+        if(!taken.has(x + ',' + y)){
+          await j(`/api/locations/${l.id}/position`, {method:'PUT',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({x, y})});
+          l.grid_x = x; l.grid_y = y;
+          placed = true;
+        }
+      }
+    }
+  }
+  if(orphan.length) renderMap();
+}
+
+$('#layoutBtn').onclick = () => {
+  editMode = !editMode;
+  pickId = null;
+  $('#layoutBtn').textContent = editMode ? '✅ 完成摆放' : '🔒 调整位置';
+  $('#layoutBtn').classList.toggle('on', editMode);
+  $('#editHint').textContent = editMode
+    ? '先点要挪动的柜子，再点目标格——有柜子的格会互换位置'
+    : '点击柜子下钻；点「调整位置」可自由摆放柜子';
+  renderMap();
+};
+
+window.cellClick = async (id, x, y) => {
+  if(!editMode){
+    if(id) drill(id);
+    return;
+  }
+  if(!id && pickId === null){
+    toast('先点一个要挪动的柜子');
+    return;
+  }
+  if(pickId === null){
+    if(id === null) return;
+    pickId = id;
+    renderMap();
+    return;
+  }
+  // pickId 已选：移动到 (x, y)
+  const me = LOC.find(l => l.id === pickId);
+  const r = await j(`/api/locations/${pickId}/position`, {method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({x, y})});
+  if(r && r.ok){
+    if(me){ me.grid_x = x; me.grid_y = y; }
+    const swapped = LOC.find(l => !l.parent_id && l.id !== pickId &&
+      l.grid_x === x && l.grid_y === y);
+    if(swapped && me){
+      swapped.grid_x = me.grid_x; swapped.grid_y = me.grid_y;
+    }
+    pickId = null;
+    renderMap();
+    toast('已摆放');
+  }
+};
+
 async function drill(id){
+  if(editMode) return;
   const cab = LOC.find(l => l.id === id);
   const children = LOC.filter(l => l.parent_id === id);
   const drillBox = $('#mapDrill');
@@ -121,6 +211,9 @@ async function load(){
   if(cur) sel.value = cur;
   renderMap();
 }
+const _style = document.createElement('style');
+_style.textContent = '.map-cell.picked{outline:3px solid var(--exh-gold);animation:pulse-gold 1s infinite}@keyframes pulse-gold{50%{outline-color:rgba(200,165,98,.25)}}.map-cell.empty{border:1.5px dashed rgba(205,168,105,.3);min-height:70px}.map-cell.empty.editable:hover{border-color:var(--exh-gold);background:rgba(200,165,98,.06)}';
+document.head.appendChild(_style);
 window.rename = async (id) => {
   const cur = nameOf(id);
   const name = prompt('新名称：', cur);

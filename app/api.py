@@ -675,11 +675,14 @@ class LocationPayload(BaseModel):
     code: Optional[str] = None
 
 
+GRID_COLS = 8   # 场馆平面图每行格数
+
+
 @router.get("/locations")
 def list_locations(_: dict = Depends(require_any)):
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT l.id, l.parent_id, l.name, l.code,
+            """SELECT l.id, l.parent_id, l.name, l.code, l.grid_x, l.grid_y,
                       (SELECT COUNT(*) FROM item i WHERE i.location_id = l.id) AS items
                FROM location l
                ORDER BY (l.parent_id IS NULL) DESC, l.parent_id, l.id""").fetchall()
@@ -697,17 +700,59 @@ def add_location(p: LocationPayload, _: dict = Depends(require_admin)):
                 raise HTTPException(400, "上级库位不存在")
     with get_conn() as conn:
         code = (p.code or "").strip()
-        if not code and p.parent_id is None:
-            # 顶层展柜自动编号 C01/C02…（编号体系：平面格式图的格子号）
-            n = 1
-            while conn.execute("SELECT 1 FROM location WHERE code=?",
-                               (f"C{n:02d}",)).fetchone():
-                n += 1
-            code = f"C{n:02d}"
+        gx = gy = None
+        if p.parent_id is None:
+            if not code:
+                # 顶层展柜自动编号 C01/C02…（编号体系：平面格式图的格子号）
+                n = 1
+                while conn.execute("SELECT 1 FROM location WHERE code=?",
+                                   (f"C{n:02d}",)).fetchone():
+                    n += 1
+                code = f"C{n:02d}"
+            # 自动分配平面图第一个空格子
+            taken = {(r["grid_x"], r["grid_y"]) for r in conn.execute(
+                "SELECT grid_x, grid_y FROM location "
+                "WHERE parent_id IS NULL AND grid_x IS NOT NULL")}
+            y = 0
+            while True:
+                for x in range(GRID_COLS):
+                    if (x, y) not in taken:
+                        gx, gy = x, y
+                        break
+                if gx is not None:
+                    break
+                y += 1
         cur = conn.execute(
-            "INSERT INTO location(parent_id, name, code) VALUES(?,?,?)",
-            (p.parent_id, p.name.strip(), code or None))
+            "INSERT INTO location(parent_id, name, code, grid_x, grid_y) VALUES(?,?,?,?,?)",
+            (p.parent_id, p.name.strip(), code or None, gx, gy))
         return {"ok": True, "id": cur.lastrowid, "code": code or None}
+
+
+class PositionPayload(BaseModel):
+    x: int
+    y: int
+
+
+@router.put("/locations/{loc_id}/position")
+def move_location(loc_id: int, p: PositionPayload, _: dict = Depends(require_admin)):
+    """平面图摆放：把柜子移到 (x, y)；目标格已有柜子则两者交换。"""
+    if not (0 <= p.x < GRID_COLS and 0 <= p.y < 200):
+        raise HTTPException(400, "格子坐标超出平面范围")
+    with get_conn() as conn:
+        me = conn.execute(
+            "SELECT id, grid_x, grid_y FROM location "
+            "WHERE id=? AND parent_id IS NULL", (loc_id,)).fetchone()
+        if not me:
+            raise HTTPException(404, "展柜不存在")
+        other = conn.execute(
+            "SELECT id FROM location WHERE parent_id IS NULL AND grid_x=? AND grid_y=?",
+            (p.x, p.y)).fetchone()
+        if other:
+            conn.execute("UPDATE location SET grid_x=?, grid_y=? WHERE id=?",
+                         (me["grid_x"], me["grid_y"], other["id"]))
+        conn.execute("UPDATE location SET grid_x=?, grid_y=? WHERE id=?",
+                     (p.x, p.y, loc_id))
+    return {"ok": True}
 
 
 @router.put("/locations/{loc_id}")

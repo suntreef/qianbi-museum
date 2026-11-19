@@ -128,7 +128,9 @@ CREATE TABLE IF NOT EXISTS location (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     parent_id INTEGER REFERENCES location(id),  -- 树形：展柜→层→盒
     name      TEXT,
-    code      TEXT UNIQUE
+    code      TEXT UNIQUE,
+    grid_x    INTEGER,                          -- 场馆平面图格子坐标（列）
+    grid_y    INTEGER                           -- 场馆平面图格子坐标（行）
 );
 
 CREATE TABLE IF NOT EXISTS event (
@@ -234,6 +236,8 @@ def init_db() -> None:
             _ensure_column(conn, "item", col, ddl)
         _ensure_column(conn, "dict_entry", "code", "TEXT")     # 品类/时代编码（编号体系用）
         _ensure_column(conn, "item", "pub_views", "INTEGER DEFAULT 0")  # 导览浏览数
+        _ensure_column(conn, "location", "grid_x", "INTEGER")   # 场馆平面图坐标
+        _ensure_column(conn, "location", "grid_y", "INTEGER")
         try:
             # FTS 结构随版本演进（字段可能增减），启动时删除重建；
             # 索引数据本来就全量来自 item 表，紧随其后的 fts_rebuild 无损补齐
