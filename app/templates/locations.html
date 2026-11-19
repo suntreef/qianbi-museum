@@ -1,17 +1,32 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h2>库位管理</h2><p class="sub">库位按树形组织：展柜 → 层 → 盒。先建展柜（不选上级），再在展柜下建层和盒。
-藏品在档案页选择库位，盘点按库位核对。</p></div>
-<div class="filters addrow">
-  <select class="input" id="parentId"><option value="">（作为顶层，如：某展柜）</option></select>
-  <input class="input grow" id="name" placeholder="名称，如 一号展柜 / 第2层 / 钱币盒A">
-  <input class="input" id="code" placeholder="编号（可选）" style="width:130px">
-  <button class="btn primary" id="addBtn">➕ 添加库位</button>
+<div class="page-head">
+  <h2>库位与场馆平面图</h2>
+  <p class="sub">平面格式图按编号展示所有展柜（C01/C02…），点击柜子下钻层与盒，直达藏品。
+  层与盒的建议命名：「第1层」「钱币盒A」——编号体系 + 平面图双重定位。</p>
 </div>
-<table id="tbl">
-  <thead><tr><th>名称</th><th>上级</th><th>编号</th><th>藏品数</th><th>操作</th></tr></thead>
-  <tbody></tbody>
-</table>
+
+<!-- 场馆平面格式图 -->
+<div class="card">
+  <div class="card-head"><span>🏛️ 场馆平面格式图</span>
+    <span class="hint" id="mapHint"></span></div>
+  <div id="mapGrid" class="map-grid"></div>
+  <div id="mapDrill" class="map-drill" hidden></div>
+</div>
+
+<div class="card">
+  <div class="card-head"><span>🛠 添加库位</span></div>
+  <div class="filters">
+    <select id="parentId" class="input"><option value="">（作为顶层展柜）</option></select>
+    <input id="name" class="input grow" placeholder="名称，如 一号展柜 / 第2层 / 钱币盒A">
+    <input id="code" class="input" placeholder="编号（留空自动 C01…）" style="width:150px">
+    <button class="btn primary" id="addBtn">➕ 添加</button>
+  </div>
+  <table>
+    <thead><tr><th>名称</th><th>编号</th><th>上级</th><th>藏品数</th><th>操作</th></tr></thead>
+    <tbody id="treeBody"></tbody>
+  </table>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -33,25 +48,78 @@ function toast(msg){
 }
 const nameOf = id => (LOC.find(l => l.id === id) || {}).name || '';
 
+/* ---------- 场馆平面格式图 ---------- */
+function renderMap(){
+  const cabinets = LOC.filter(l => !l.parent_id);
+  const grid = $('#mapGrid');
+  $('#mapHint').textContent = cabinets.length ? `${cabinets.length} 个展柜 · 点击柜子下钻` : '还没有展柜——在下方添加第一台';
+  grid.innerHTML = cabinets.map(l => `
+    <div class="map-cell" data-id="${l.id}" onclick="drill(${l.id})">
+      <div class="map-code">${l.code || '未编号'}</div>
+      <div class="map-name">${l.name}</div>
+      <div class="map-count">${l.items} 件</div>
+    </div>`).join('');
+}
+
+async function drill(id){
+  const cab = LOC.find(l => l.id === id);
+  const children = LOC.filter(l => l.parent_id === id);
+  const drillBox = $('#mapDrill');
+  drillBox.hidden = false;
+  if(!children.length){
+    drillBox.innerHTML = `<div class="drill-head"><b>${cab.code||''} ${cab.name}</b>
+      <a class="btn sm" href="/items?location_id=${id}">查看该柜全部藏品（${cab.items} 件）→</a></div>
+      <p class="hint">该展柜还没有分层/分盒——建议在下方添加「第1层」「第2层」，再在层下加盒子。</p>`;
+    return;
+  }
+  const kids = children.map(ch => {
+    const grand = LOC.filter(g => g.parent_id === ch.id);
+    const cells = grand.length
+      ? `<div class="map-grid small">${grand.map(g => `
+          <div class="map-cell small" onclick="event.stopPropagation();viewLoc(${g.id})">
+            <div class="map-code">${g.code || ''}</div>
+            <div class="map-name">${g.name}</div>
+            <div class="map-count">${g.items} 件</div>
+          </div>`).join('')}</div>`
+      : `<a class="btn sm" href="/items?location_id=${ch.id}">查看该层藏品（${ch.items} 件）→</a>`;
+    return `<div class="drill-row">
+      <div class="drill-head"><b>${ch.code ? ch.code + ' ' : ''}${ch.name}</b>
+        <span class="hint">${ch.items} 件直接存放</span>
+        <a class="btn sm ghost" href="/items?location_id=${ch.id}">全部藏品</a></div>
+      ${cells}
+    </div>`;
+  }).join('');
+  drillBox.innerHTML = `<div class="drill-head">
+      <b>${cab.code||''} ${cab.name} 的内部结构</b>
+      <a class="btn sm" href="/items?location_id=${id}">查看全部藏品（${cab.items} 件）→</a>
+      <button class="mini" onclick="document.getElementById('mapDrill').hidden=true">收起</button></div>
+    ${kids}`;
+  drillBox.scrollIntoView({behavior:'smooth'});
+}
+function viewLoc(id){ location = '/items?location_id=' + id; }
+
+/* ---------- 树形管理表格 ---------- */
 async function load(){
   LOC = await j('/api/locations');
-  const tb = $('#tbl tbody');
+  const tb = $('#treeBody');
   tb.innerHTML = '';
   for(const l of LOC){
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${l.parent_id ? '　└ ' : ''}${l.name}</td>
+      <td class="num">${l.code||''}</td>
       <td>${l.parent_id ? nameOf(l.parent_id) : '—'}</td>
-      <td>${l.code||''}</td><td>${l.items}</td>
+      <td class="num">${l.items}</td>
       <td><button class="mini" onclick="rename(${l.id})">改名</button>
-          <button class="mini" onclick="del(${l.id}, ${l.items})">删</button></td>`;
+          <button class="mini del" onclick="del(${l.id})">删</button></td>`;
     tb.appendChild(tr);
   }
   const sel = $('#parentId');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">（作为顶层，如：某展柜）</option>' +
+  sel.innerHTML = '<option value="">（作为顶层展柜）</option>' +
     LOC.filter(l => !l.parent_id).map(l =>
       `<option value="${l.id}">${l.name}</option>`).join('');
   if(cur) sel.value = cur;
+  renderMap();
 }
 window.rename = async (id) => {
   const cur = nameOf(id);
@@ -63,7 +131,7 @@ window.rename = async (id) => {
     body: JSON.stringify({name, parent_id: l.parent_id})});
   if(d){ toast('已改名'); load(); }
 };
-window.del = async (id, items) => {
+window.del = async (id) => {
   if(!confirm('删除该库位？')) return;
   const d = await j('/api/locations/' + id, {method:'DELETE'});
   if(d){ toast('已删除'); load(); }
@@ -75,7 +143,7 @@ $('#addBtn').onclick = async () => {
     body: JSON.stringify({name: $('#name').value.trim(),
       parent_id: $('#parentId').value ? parseInt($('#parentId').value) : null,
       code: $('#code').value.trim() || null})});
-  if(d){ toast('已添加'); $('#name').value=''; $('#code').value=''; load(); }
+  if(d){ toast('已添加' + (d.code ? `，编号 ${d.code}` : '')); $('#name').value=''; $('#code').value=''; load(); }
 };
 load();
 </script>

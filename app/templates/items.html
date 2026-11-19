@@ -304,6 +304,13 @@ $('#importFile').onchange = async e => {
 
 Promise.all([fill($('#fCategory'),'category'), fill($('#fSeries'),'series'),
              fill($('#fLevel'),'item_level'), fillLocs($('#fLocation'))])
-  .then(() => { search(0); loadStats(); });
+  .then(() => {
+    // 平面格式图点击柜子 → ?location_id= 直达该柜藏品
+    const urlLoc = new URLSearchParams(location.search).get('location_id');
+    if(urlLoc) $('#fLocation').value = urlLoc;
+    if(new URLSearchParams(location.search).get('q'))
+      $('#q').value = new URLSearchParams(location.search).get('q');
+    search(0); loadStats();
+  });
 </script>
 {% endblock %}

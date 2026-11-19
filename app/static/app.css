@@ -879,3 +879,37 @@ tr.rowlink { cursor: pointer; }
   }
   .item-card:hover { transform: none; }
 }
+/* ============ 场馆平面格式图 ============ */
+.map-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-3);
+}
+.map-cell {
+  background: linear-gradient(145deg, #212825, #171c1a);
+  border: 1px solid rgba(205, 168, 105, .30);
+  border-radius: var(--r-m);
+  padding: var(--sp-3);
+  cursor: pointer; color: #f0ece1;
+  transition: transform var(--dur-fast, 140ms), border-color var(--dur-fast, 140ms);
+  min-height: 86px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.map-cell:hover { transform: translateY(-2px); border-color: var(--exh-gold, #c8a562); }
+.map-cell:active { transform: scale(.97); }
+.map-cell .map-code {
+  font-family: var(--mono); font-weight: 700; font-size: 15px;
+  color: var(--exh-gold, #c8a562); letter-spacing: 1px;
+}
+.map-cell .map-name { font-size: var(--fs-s); color: #eceae4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-cell .map-count { font-size: var(--fs-xs); color: #9d9a8e; margin-top: auto; }
+.map-cell.nocode .map-code { color: #8a877c; }
+.map-grid.small { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--sp-2); }
+.map-cell.small { min-height: 72px; padding: var(--sp-2) var(--sp-3); }
+.map-cell.small .map-code { font-size: 13px; }
+.map-drill { margin-top: var(--sp-3);
+  border-top: 1px solid var(--hair);
+  padding-top: var(--sp-3); }
+.drill-head { display: flex; align-items: center; gap: var(--sp-2);
+  flex-wrap: wrap; margin: var(--sp-2) 0; }
+.drill-head b { font-family: var(--serif); font-size: var(--fs-m); }

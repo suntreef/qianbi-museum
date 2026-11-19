@@ -696,10 +696,18 @@ def add_location(p: LocationPayload, _: dict = Depends(require_admin)):
                                 (p.parent_id,)).fetchone():
                 raise HTTPException(400, "上级库位不存在")
     with get_conn() as conn:
+        code = (p.code or "").strip()
+        if not code and p.parent_id is None:
+            # 顶层展柜自动编号 C01/C02…（编号体系：平面格式图的格子号）
+            n = 1
+            while conn.execute("SELECT 1 FROM location WHERE code=?",
+                               (f"C{n:02d}",)).fetchone():
+                n += 1
+            code = f"C{n:02d}"
         cur = conn.execute(
             "INSERT INTO location(parent_id, name, code) VALUES(?,?,?)",
-            (p.parent_id, p.name.strip(), (p.code or "").strip() or None))
-        return {"ok": True, "id": cur.lastrowid}
+            (p.parent_id, p.name.strip(), code or None))
+        return {"ok": True, "id": cur.lastrowid, "code": code or None}
 
 
 @router.put("/locations/{loc_id}")
