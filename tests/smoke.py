@@ -313,6 +313,24 @@ with TestClient(app) as c:
     check("数据库备份", r.status_code == 200 and len(r.content) > 5000,
           f"{len(r.content)}字节")
 
+    # 平面图跨距：横柜 2x1 与重叠检测
+    locA = c.post("/api/locations", json={"name": "横柜A"}).json()["id"]
+    locB = c.post("/api/locations", json={"name": "竖柜B"}).json()["id"]
+    # 移到远离已有柜子的空区再测跨距
+    c.put(f"/api/locations/{locB}/position", json={"x": 2, "y": 8})
+    r = c.put(f"/api/locations/{locA}/position",
+              json={"x": 5, "y": 8, "w": 2, "h": 1}).json()
+    check("跨距-横柜2x1", r.get("ok") is True, str(r))
+    r = c.put(f"/api/locations/{locB}/position",
+              json={"x": 6, "y": 8, "w": 1, "h": 2})
+    check("跨距-重叠拒绝", r.status_code == 400, str(r.status_code))
+    locs = {l["id"]: l for l in c.get("/api/locations").json()}
+    check("跨距-坐标持久化", locs[locA]["grid_w"] == 2
+          and locs[locA]["grid_x"] == 5 and locs[locA]["grid_y"] == 8,
+          str((locs[locA]["grid_x"], locs[locA]["grid_y"], locs[locA]["grid_w"])))
+    r = c.put(f"/api/locations/{locB}/position",
+              json={"x": 6, "y": 8})
+    check("跨距-跨入横柜占格拒绝", r.status_code == 400, str(r.status_code))
     check("库位页", c.get("/locations").status_code == 200)
     check("盘点页", c.get("/inventory").status_code == 200)
     check("录入员库位页被拒", staff.get("/locations", follow_redirects=False).status_code == 303)

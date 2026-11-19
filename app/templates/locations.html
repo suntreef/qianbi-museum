@@ -13,7 +13,21 @@
   <div id="mapGrid" class="map-grid edit" style="grid-template-columns:repeat(8,1fr)"></div>
   <div class="filters" style="margin-top:10px">
     <button class="btn sm" id="layoutBtn">🔒 调整位置</button>
-    <span class="hint" id="editHint">点击柜子下钻；点「调整位置」可自由摆放柜子</span>
+    <span class="hint" id="editHint">点击柜子下钻；点「调整位置」可自由摆放柜子（横柜/竖柜/回字形拼摆）</span>
+  </div>
+  <div id="shapeBar" class="filters" hidden
+       style="background:var(--brand-soft);border-radius:var(--r-m);padding:8px 12px">
+    <span class="lab" style="color:var(--brand-strong);font-weight:700" id="shapeName"></span>
+    <span class="lab">宽</span>
+    <button class="mini" onclick="resizeSpan(-1, 0)">−</button>
+    <b class="num" id="spanW">1</b>
+    <button class="mini" onclick="resizeSpan(1, 0)">＋</button>
+    <span class="lab">高</span>
+    <button class="mini" onclick="resizeSpan(0, -1)">−</button>
+    <b class="num" id="spanH">1</b>
+    <button class="mini" onclick="resizeSpan(0, 1)">＋</button>
+    <button class="mini" onclick="rotateSpan()">↺ 横竖互换</button>
+    <span class="hint">横柜=宽2、竖柜=高2；回字形用四段柜子拼摆</span>
   </div>
   <div id="mapDrill" class="map-drill" hidden></div>
 </div>
@@ -60,13 +74,24 @@ function renderMap(){
   const cabinets = LOC.filter(l => !l.parent_id && l.grid_x !== null);
   const orphan = LOC.filter(l => !l.parent_id && l.grid_x === null);
   const grid = $('#mapGrid');
-  const maxY = Math.max(0, ...cabinets.map(l => l.grid_y || 0));
+  const maxY = Math.max(0, ...cabinets.map(l => (l.grid_y||0) + (l.grid_h||1) - 1));
+  // 跨距：柜子占 w×h 格，其余格被覆盖时跳过
+  const covered = new Set();
+  for(const c of cabinets){
+    const w = c.grid_w || 1, h = c.grid_h || 1;
+    for(let dx = 0; dx < w; dx++)
+      for(let dy = 0; dy < h; dy++)
+        if(dx || dy) covered.add((c.grid_x + dx) + ',' + (c.grid_y + dy));
+  }
   let cells = '';
   for(let y = 0; y <= maxY; y++){
     for(let x = 0; x < COLS; x++){
+      if(covered.has(x + ',' + y)) continue;   // 被跨距柜覆盖
       const l = cabinets.find(c => c.grid_x === x && c.grid_y === y);
       if(l){
+        const w = l.grid_w || 1, h = l.grid_h || 1;
         cells += `<div class="map-cell ${pickId===l.id?'picked':''}"
+          style="grid-column:span ${w};grid-row:span ${h}"
           onclick="cellClick(${l.id})" title="${l.name}">
           <div class="map-code">${l.code || '未编号'}</div>
           <div class="map-name">${l.name}</div>

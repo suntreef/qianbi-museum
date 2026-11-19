@@ -130,7 +130,9 @@ CREATE TABLE IF NOT EXISTS location (
     name      TEXT,
     code      TEXT UNIQUE,
     grid_x    INTEGER,                          -- 场馆平面图格子坐标（列）
-    grid_y    INTEGER                           -- 场馆平面图格子坐标（行）
+    grid_y    INTEGER,                          -- 场馆平面图格子坐标（行）
+    grid_w    INTEGER DEFAULT 1,                -- 占几格宽（横柜=2）
+    grid_h    INTEGER DEFAULT 1                 -- 占几格高（竖柜=2）
 );
 
 CREATE TABLE IF NOT EXISTS event (
@@ -238,6 +240,8 @@ def init_db() -> None:
         _ensure_column(conn, "item", "pub_views", "INTEGER DEFAULT 0")  # 导览浏览数
         _ensure_column(conn, "location", "grid_x", "INTEGER")   # 场馆平面图坐标
         _ensure_column(conn, "location", "grid_y", "INTEGER")
+        _ensure_column(conn, "location", "grid_w", "INTEGER DEFAULT 1")  # 格子跨距
+        _ensure_column(conn, "location", "grid_h", "INTEGER DEFAULT 1")
         try:
             # FTS 结构随版本演进（字段可能增减），启动时删除重建；
             # 索引数据本来就全量来自 item 表，紧随其后的 fts_rebuild 无损补齐

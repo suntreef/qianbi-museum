@@ -682,7 +682,8 @@ GRID_COLS = 8   # 场馆平面图每行格数
 def list_locations(_: dict = Depends(require_any)):
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT l.id, l.parent_id, l.name, l.code, l.grid_x, l.grid_y,
+            """SELECT l.id, l.parent_id, l.name, l.code,
+                      l.grid_x, l.grid_y, l.grid_w, l.grid_h,
                       (SELECT COUNT(*) FROM item i WHERE i.location_id = l.id) AS items
                FROM location l
                ORDER BY (l.parent_id IS NULL) DESC, l.parent_id, l.id""").fetchall()
@@ -731,27 +732,47 @@ def add_location(p: LocationPayload, _: dict = Depends(require_admin)):
 class PositionPayload(BaseModel):
     x: int
     y: int
+    w: Optional[int] = None    # 占几格宽（横柜=2）
+    h: Optional[int] = None    # 占几格高（竖柜=2）
+
+
+def _occupied(conn, exclude_id: int) -> set:
+    """所有其他顶层柜占用的格子集合（展开跨距）。"""
+    cells = set()
+    for r in conn.execute(
+            "SELECT id, grid_x, grid_y, grid_w, grid_h FROM location "
+            "WHERE parent_id IS NULL AND grid_x IS NOT NULL AND id != ?",
+            (exclude_id,)).fetchall():
+        w = max(1, r["grid_w"] or 1)
+        h = max(1, r["grid_h"] or 1)
+        for dx in range(w):
+            for dy in range(h):
+                cells.add((r["grid_x"] + dx, r["grid_y"] + dy))
+    return cells
 
 
 @router.put("/locations/{loc_id}/position")
 def move_location(loc_id: int, p: PositionPayload, _: dict = Depends(require_admin)):
-    """平面图摆放：把柜子移到 (x, y)；目标格已有柜子则两者交换。"""
+    """平面图摆放：移动柜子到 (x,y)，可同时调整跨距 w/h（横柜 2x1、竖柜 1x2）。
+    与其他柜子的占格重叠时拒绝（400），回字形即多段柜子拼摆。"""
     if not (0 <= p.x < GRID_COLS and 0 <= p.y < 200):
         raise HTTPException(400, "格子坐标超出平面范围")
     with get_conn() as conn:
         me = conn.execute(
-            "SELECT id, grid_x, grid_y FROM location "
+            "SELECT id, grid_x, grid_y, grid_w, grid_h FROM location "
             "WHERE id=? AND parent_id IS NULL", (loc_id,)).fetchone()
         if not me:
             raise HTTPException(404, "展柜不存在")
-        other = conn.execute(
-            "SELECT id FROM location WHERE parent_id IS NULL AND grid_x=? AND grid_y=?",
-            (p.x, p.y)).fetchone()
-        if other:
-            conn.execute("UPDATE location SET grid_x=?, grid_y=? WHERE id=?",
-                         (me["grid_x"], me["grid_y"], other["id"]))
-        conn.execute("UPDATE location SET grid_x=?, grid_y=? WHERE id=?",
-                     (p.x, p.y, loc_id))
+        w = max(1, min(6, p.w if p.w is not None else (me["grid_w"] or 1)))
+        h = max(1, min(20, p.h if p.h is not None else (me["grid_h"] or 1)))
+        taken = _occupied(conn, loc_id)
+        for dx in range(w):
+            for dy in range(h):
+                if (p.x + dx, p.y + dy) in taken:
+                    raise HTTPException(400, "与相邻展柜位置重叠，请先挪开或缩小尺寸")
+        conn.execute(
+            "UPDATE location SET grid_x=?, grid_y=?, grid_w=?, grid_h=? WHERE id=?",
+            (p.x, p.y, w, h, loc_id))
     return {"ok": True}
 
 
